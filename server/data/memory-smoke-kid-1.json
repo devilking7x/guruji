@@ -1,0 +1,20 @@
+[
+  {
+    "id": "23c01ac4-2365-402e-8db4-e4d79e1531cc",
+    "studentId": "smoke-kid-1",
+    "kind": "profile",
+    "text": "Naam: Test, Class: 8",
+    "createdAt": "2026-09-29T16:13:08.146Z",
+    "updatedAt": "2026-09-29T16:13:08.146Z",
+    "superseded": false
+  },
+  {
+    "id": "44cfd1c7-01d8-42e7-9a86-351dbe5e1e7b",
+    "studentId": "smoke-kid-1",
+    "kind": "nickname",
+    "text": "{\"nickname\":\"Tez-Pandit-38\",\"changed\":false}",
+    "createdAt": "2026-09-29T16:13:08.148Z",
+    "updatedAt": "2026-09-29T16:13:08.148Z",
+    "superseded": false
+  }
+]

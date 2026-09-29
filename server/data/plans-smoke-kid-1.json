@@ -1,0 +1,95 @@
+{
+  "studentId": "smoke-kid-1",
+  "class": "8",
+  "createdAt": "2026-09-29T16:13:27.781Z",
+  "daysTotal": 7,
+  "minutesPerDay": 30,
+  "chapterIds": [
+    "light"
+  ],
+  "days": [
+    {
+      "day": 1,
+      "tasks": [
+        {
+          "type": "padho",
+          "title": "Prakash — padho aur samjho",
+          "detail": "Key points dhyan se padho, phir khud se 2-3 sawal banao. Roz lagbhag 30 minute padhai ka lakshya rakho.",
+          "done": false
+        },
+        {
+          "type": "quiz",
+          "title": "Prakash — chhota quiz do",
+          "detail": "Is chapter par quiz attempt karo aur galat jawab note karo.",
+          "done": false
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "tasks": [
+        {
+          "type": "revision",
+          "title": "Purane chapters revise karo",
+          "detail": "Pichhle dinon ke weak topics dobara padho aur ek baar phir quiz do.",
+          "done": false
+        }
+      ]
+    },
+    {
+      "day": 3,
+      "tasks": [
+        {
+          "type": "revision",
+          "title": "Purane chapters revise karo",
+          "detail": "Pichhle dinon ke weak topics dobara padho aur ek baar phir quiz do.",
+          "done": false
+        }
+      ]
+    },
+    {
+      "day": 4,
+      "tasks": [
+        {
+          "type": "revision",
+          "title": "Purane chapters revise karo",
+          "detail": "Pichhle dinon ke weak topics dobara padho aur ek baar phir quiz do.",
+          "done": false
+        }
+      ]
+    },
+    {
+      "day": 5,
+      "tasks": [
+        {
+          "type": "revision",
+          "title": "Purane chapters revise karo",
+          "detail": "Pichhle dinon ke weak topics dobara padho aur ek baar phir quiz do.",
+          "done": false
+        }
+      ]
+    },
+    {
+      "day": 6,
+      "tasks": [
+        {
+          "type": "revision",
+          "title": "Purane chapters revise karo",
+          "detail": "Pichhle dinon ke weak topics dobara padho aur ek baar phir quiz do.",
+          "done": false
+        }
+      ]
+    },
+    {
+      "day": 7,
+      "tasks": [
+        {
+          "type": "revision",
+          "title": "Purane chapters revise karo",
+          "detail": "Pichhle dinon ke weak topics dobara padho aur ek baar phir quiz do.",
+          "done": false
+        }
+      ]
+    }
+  ]
+}
