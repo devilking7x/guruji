@@ -7,6 +7,7 @@ import {
 } from "./llm";
 import * as memory from "./memory";
 import { trySpend, recordSpend } from "./budget";
+import { searchChapters, citationFor, ChapterHit } from "./chapters";
 
 export class BudgetError extends Error {
   constructor(message: string) {
@@ -65,10 +66,100 @@ function containsDevanagari(s: string): boolean {
   return /[\u0900-\u097f]/.test(s);
 }
 
+function tokenizeWords(s: string): string[] {
+  return (s || "")
+    .toLowerCase()
+    .split(/[^a-z0-9\u0900-\u097f\u0980-\u09ff]+/u)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 2);
+}
+
+// Clearly off-syllabus domains (Class 6-10 Maths/Science ke bahar).
+const OFF_SYLLABUS_WORDS = new Set([
+  "cricket", "football", "hockey", "ipl", "kabbadi",
+  "bollywood", "film", "movie", "actor", "actress",
+  "gaana", "song", "music", "singer", "dance",
+  "politics", "sarkar", "election", "chunav", "neta", "minister", "bjp", "congress",
+  "game", "pubg", "freefire", "gaming", "tiktok", "instagram", "reel",
+  "shayari", "joke", "kahani", "story", "poem", "kavita",
+  "dharam", "religion", "mandir", "masjid",
+  "business", "job", "naukri", "salary",
+  "love", "shaadi", "marriage",
+  "crush", "girlfriend", "boyfriend", "dating", "valentine",
+  "sharab", "alcohol", "cigarette", "smoking", "drugs", "nasha",
+  "murder", "jua", "gambling", "lottery",
+  "porn", "sexy", "nude",
+  "क्रिकेट", "बॉलीवुड", "फिल्म", "गाना", "राजनीति", "सरकार", "चुनाव", "खेल", "कहानी", "कविता",
+  "शराब", "सिगरेट", "ड्रग्स", "नशा", "डेटिंग", "वैलेंटाइन", "मर्डर", "जुआ", "क्रश", "पोर्न",
+]);
+
+/** Deterministic check: does the question belong to a clearly off-syllabus domain? */
+export function isOutOfSyllabus(message: string): boolean {
+  const words = new Set(tokenizeWords(message));
+  for (const w of words) {
+    if (OFF_SYLLABUS_WORDS.has(w)) return true;
+  }
+  return false;
+}
+
+export function outOfSyllabusReply(devanagari: boolean): string {
+  return devanagari
+    ? "यह सवाल हमारे सिलेबस (Class 6-10 Maths/Science) के बाहर है 🙂। लेकिन मैं तुम्हारी Maths या Science में पूरी मदद कर सकता हूँ — जैसे भिन्न, प्रकाश संश्लेषण, या प्रकाश। क्या पढ़ना चाहोगे?"
+    : "Ye sawal humare syllabus (Class 6-10 Maths/Science) ke bahar hai 🙂. Lekin main tumhari Maths ya Science me poori madad kar sakta hoon — jaise fractions, photosynthesis, ya light. Kya padhna chahte ho?";
+}
+
+interface LadderInfo {
+  level: 1 | 2 | 3;
+  snippet: string;
+}
+
+/** Hint-ladder level across turns: same question asked again → escalate (cap 3). */
+function ladderLevelFor(studentId: string, message: string): LadderInfo {
+  const snippet = message.slice(0, 120);
+  const prev = memory
+    .list(studentId)
+    .find((r) => r.kind === "hint_ladder" && !r.superseded);
+  if (prev) {
+    try {
+      const d = JSON.parse(prev.text) as { level?: number; snippet?: string };
+      const prevWords = new Set(tokenizeWords(d.snippet || ""));
+      const curWords = new Set(tokenizeWords(message));
+      let overlap = 0;
+      for (const w of curWords) if (prevWords.has(w)) overlap += 1;
+      if (overlap >= 2) {
+        const lvl = Math.min(3, Math.max(1, (d.level || 1) + 1));
+        return { level: lvl as 1 | 2 | 3, snippet };
+      }
+    } catch {
+      // fall through to level 1
+    }
+  }
+  return { level: 1, snippet };
+}
+
+function saveLadderLevel(studentId: string, info: LadderInfo): void {
+  // Supersede old ladder records (empty textIncludes matches all).
+  memory.markSupersededIfExists(studentId, "hint_ladder", "");
+  memory.add(
+    studentId,
+    JSON.stringify({ level: info.level, snippet: info.snippet, at: new Date().toISOString() }),
+    "hint_ladder"
+  );
+}
+
+const LADDER_GUIDANCE: Record<1 | 2 | 3, string> = {
+  1: "Level 1 (nudge): sirf ek chhota ishara do + EK guiding question poocho. Koi step solve karke mat dikhao.",
+  2: "Level 2 (partial step): aadha kadam dikhao (ek chhota hissa), phir student se aage ka step poocho. Poora hal kabhi mat do.",
+  3: "Level 3 (worked sub-step): ek chhota hissa solve karke dikhao taaki pattern samajh aaye, lekin AAKHRI JAWAB phir bhi student khud nikaale. Final answer dena MANA hai.",
+};
+
 function buildSystemPrompt(
   profileText: string,
   memoryHits: memory.MemoryRecord[],
-  mode: "chat" | "revision"
+  mode: "chat" | "revision",
+  chapters: ChapterHit[],
+  ladder: LadderInfo,
+  offSyllabus: boolean
 ): string {
   const memBlock =
     memoryHits.length > 0
@@ -78,22 +169,71 @@ function buildSystemPrompt(
   const modeBlock =
     mode === "revision"
       ? "REVISION MODE: weak topics dohraao, chhote sawal poocho, aur galtiyon par gently guide karo."
-      : "CHAT MODE: student ke sawal ka seedha, simple jawab do.";
+      : "CHAT MODE: student ke sawal ka Socratic style me jawab do.";
+
+  const chapterBlock =
+    chapters.length > 0
+      ? "REFERENCE NOTES (inme se padhao, inke bahar mat jao):\n" +
+        chapters
+          .map(
+            (h) =>
+              `${citationFor(h.chapter)}\n` +
+              h.chapter.keyPoints.map((p) => `- ${p}`).join("\n")
+          )
+          .join("\n\n") +
+        "\nJab in notes se jawab do to citation zaroor lagao, jaise [Class 8 Science · Adhyay: Prakash]."
+      : "";
+
+  const offSyllabusBlock = offSyllabus
+    ? "DHYAAN: student ka sawal humare syllabus (Class 6-10 Maths/Science) ke bahar lag raha hai. " +
+      "Politely Hindi me batao: 'Ye sawal humare syllabus ke bahar hai, lekin main <najdeeki topic> me tumhari madad kar sakta hoon!' " +
+      "Najdeeki topic ke liye upar diye gaye chapters me se chuno."
+    : "";
+
   return [
     "Tum Guruji ho — Classes 6-10 ke Maths aur Science ke patient, encouraging Hindi tutor.",
     modeBlock,
     "",
+    "PEHCHAAN AUR SEEMA (har turn me yaad rakho):",
+    "- Tum ek AI ho — asli teacher, dost ya parivaar ke sadasya ki jagah NAHI le sakte. Kabhi ye daava mat karo ki tum human ho.",
+    "- Student se romantic ya emotional rishta banane wali baatein KABHI mat karo ('main tumse pyaar karta hoon', 'tum mere sabse khaas ho' jaisi baatein sakht MANA hain).",
+    "- Chaploosi ya manipulative tareef mat karo — sirf genuine, padhai se judi encouragement do.",
+    "- Kabhi phone number, address, school ka naam, photo ya koi personal detail MAT maango. Naam aur class hi kaafi hai.",
+    "- Agar student udaas, pareshan ya khatarnaak baat kare to use kisi bharosemand adult (mata-pita/teacher) se baat karne ko kaho.",
+    "",
+    "SOCRATIC HINT-LADDER — sakht niyam, inhe KABHI mat todo:",
+    "1. KABHI bhi final answer mat do — na homework ka, na exam question ka, na quiz ka. Seedha jawab dena MANA hai.",
+    "2. Pehle student ki galti DIAGNOSE karo: usne kahan galat socha? Usi point ko pakdo.",
+    "3. Har turn me MAXIMUM EK sawal poocho. Ek se zyada sawal kabhi mat poocho.",
+    "4. Hint-ladder turn-dar-turn tez hota hai, lekin FINAL ANSWER kabhi nahi:",
+    `- ${LADDER_GUIDANCE[ladder.level]}`,
+    `Is turn ka HINT-LADDER LEVEL: ${ladder.level}`,
+    "5. Hamesha encouragement do — galti par daanto mat. 'Galti se hi seekhte hain' wala tone rakho.",
+    "",
+    "GALAT example (aisa KABHI mat karo):",
+    'Student: "1/2 + 1/4 kitna hota hai?"',
+    'GALAT Guruji: "Iska jawab 3/4 hai. Pehle 1/2 ko 2/4 banao, phir jodo."',
+    "↑ Ye GALAT hai — seedha answer de diya.",
+    "",
+    "SAHI examples (aise karo):",
+    'Student: "1/2 + 1/4 kitna hota hai?"',
+    'SAHI Guruji: "Achha sawal! 👏 Pehle socho — 1/2 aur 1/4 ko jodne ke liye humein kya same karna padega? (Hint: neeche wali sankhya ke baare me socho.)"',
+    'Student: "photosynthesis kya hai?"',
+    'SAHI Guruji: "Bahut badhiya sawal! 🌱 Tumne kabhi socha hai, paudhe apna khana kahan se laate hain? Pehle ye batao — paudhe ko zinda rehne ke liye kin cheezon ki zaroorat hoti hai?"',
+    "",
     "Rules:",
     "- SIMPLE Hindi me jawab do. Student Roman Hindi me likhe to tum bhi Roman Hindi me likho; Devanagari me likhe to Devanagari me likho.",
     "- Technical English shabd (jaise photosynthesis, fraction, gravity) English me hi rakho.",
-    "- Socratic style: seedha homework ka poora answer mat do — hints aur chhote sawalon se student ko khud sochne me madad karo.",
     "- Rozmarra ki life se examples do. Jawaab short aur clear rakho.",
-    "- Har jawab ke ant me, jab natural lage, ek chhota check-sawal poocho taaki samajh confirm ho.",
     "- Agar student quiz maange to batao ki quiz mode me jaakar quiz shuru kar sakta hai.",
     "",
+    chapterBlock,
+    offSyllabusBlock,
     memBlock,
     profileText ? `\nStudent profile: ${profileText}` : "",
-  ].join("\n");
+  ]
+    .filter((s) => s.length > 0)
+    .join("\n");
 }
 
 function profileTextFor(studentId: string): string {
@@ -115,10 +255,23 @@ export async function runChat(opts: RunChatOpts): Promise<RunChatResult> {
   const pre = trySpend(ip, estimateTokens(message) + 500, 0);
   if (!pre.ok) throw new BudgetError(BUDGET_HINDI_MSG);
 
+  const inDevanagari = containsDevanagari(message);
+
+  // Out-of-syllabus: deterministic polite refusal, no LLM spend.
+  if (isOutOfSyllabus(message)) {
+    const reply = outOfSyllabusReply(inDevanagari);
+    opts.onToken(reply);
+    const inTok = estimateTokens(message) + 500;
+    const outTok = estimateTokens(reply);
+    recordSpend(ip, inTok, outTok);
+    return { inputTokens: inTok, outputTokens: outTok };
+  }
+
   const profile = profileTextFor(studentId);
   const hits = memory.search(studentId, message);
-  const system = buildSystemPrompt(profile, hits, opts.mode);
-  const inDevanagari = containsDevanagari(message);
+  const chapters = searchChapters(message, 2);
+  const ladder = ladderLevelFor(studentId, message);
+  const system = buildSystemPrompt(profile, hits, opts.mode, chapters, ladder, false);
   const scriptNote = inDevanagari
     ? "Student Devanagari me likh raha hai — tum bhi Devanagari me jawab do."
     : "Student Roman Hindi me likh raha hai — tum bhi Roman Hindi me jawab do.";
@@ -197,12 +350,25 @@ export async function runChat(opts: RunChatOpts): Promise<RunChatResult> {
 
   recordSpend(ip, inputTokens, outputTokens);
 
+  // Persist the hint-ladder level so the next turn on the same question escalates.
+  try {
+    saveLadderLevel(studentId, ladder);
+  } catch {
+    // ladder persistence must never break the response
+  }
+
   // Fire-and-forget auto-memory: extract durable facts from this exchange.
   const auto = process.env.GURUJI_AUTO_REMEMBER;
   if (!streamed || process.env.LLM_MOCK === "1" || auto === "0") return { inputTokens, outputTokens };
-  autoRemember(studentId, message, streamed).catch(() => {
-    // never break the response
-  });
+  autoRemember(studentId, message, streamed)
+    .then((t) => {
+      // Attribute the background extraction cost to this IP's budget so it
+      // can't be used to burn LLM spend off the books.
+      if (t.inputTokens > 0 || t.outputTokens > 0) recordSpend(ip, t.inputTokens, t.outputTokens);
+    })
+    .catch(() => {
+      // never break the response
+    });
   return { inputTokens, outputTokens };
 }
 
@@ -210,7 +376,7 @@ async function autoRemember(
   studentId: string,
   userMsg: string,
   assistantMsg: string
-): Promise<void> {
+): Promise<{ inputTokens: number; outputTokens: number }> {
   const res = await chatComplete({
     messages: [
       {
@@ -241,4 +407,5 @@ async function autoRemember(
   } catch {
     // ignore malformed extraction
   }
+  return { inputTokens: res.inputTokens, outputTokens: res.outputTokens };
 }

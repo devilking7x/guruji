@@ -2,7 +2,7 @@
 
 > **Har student ka AI tutor, jo use yaad rakhta hai.** Hindi-first (Roman + Devanagari), Classes 6–10, Maths/Science.
 
-[![Live Demo](https://img.shields.io/badge/demo-live-gold)](https://devilking7x.github.io/guruji/)
+[![Live Demo](https://img.shields.io/badge/demo-live-8B5CF6)](https://devilking7x.github.io/guruji/)
 [![API](https://img.shields.io/badge/api-live-green)](https://guruji.onrender.com/api/health)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -25,7 +25,7 @@ Crores of Indian students study in Hindi or their mother tongue, but almost ever
 |---|---|
 | **Size of problem** | 25+ crore school students in India; majority learn in regional languages |
 | **Severity** | Weak foundations in 6–10 decide dropout vs. degree; vernacular gap is worst where help is needed most |
-| **Quality of solution** | Streaming Hindi tutor + quiz engine + spaced revision + progress tracking, dark+gold polished UI |
+| **Quality of solution** | Strict Socratic hint-ladder tutor + NCERT-grounded RAG with citations + FSRS revision + adaptive quiz/mastery/XP + parent report, premium violet-glass UI |
 | **Proven impact** | Deployed on free cloud; per-student memory + quiz history = real usage data from day one |
 
 ---
@@ -33,12 +33,19 @@ Crores of Indian students study in Hindi or their mother tongue, but almost ever
 ## Features
 
 - 💬 **Chat tutor** — streaming answers (SSE), patient-teacher persona, Socratic follow-ups
-- 🎙 **Voice input** — Hindi (hi-IN) speech recognition, no typing needed
+- 🪜 **Strict hint-ladder** — homework ke final answers KABHI nahi; mistake diagnose karke ek-ek guiding question, hints escalate hote hain (few-shot good/bad dialogues, cross-turn ladder memory)
+- 📚 **NCERT-grounded RAG-lite** — 14 original chapter summaries (Classes 6–10 Maths/Science) server-side retrieve hote hain; jawab me chapter citations; out-of-syllabus sawalon ko politely refuse
+- 🎙 **Voice conversation loop** — mic (hi-IN) → jawab → Hindi TTS readout, speaker toggle; sab client-side, zero cost
 - 🧠 **Student memory** — naam, class, weak topics, quiz scores auto-saved (JSON store, 7-op interface)
-- 📝 **Quiz mode** — "quiz lo" → LLM-generated MCQs, instant grading, explanations
-- 🔁 **Revision mode** — weak topics se spaced revision prompts
-- 📊 **Progress view** — topics covered, quiz score history (100% real data, no fake charts)
+- 📝 **Adaptive quiz mode** — mastery se difficulty adapt (easy/medium/hard), instant grading + explanations; galat sawal auto-bante hain revision cards
+- 🃏 **FSRS revision queue** — "Aaj ka revision" flip cards, deterministic spaced repetition, server computes due cards
+- ⭐ **Mastery / XP / streaks / badges** — per-topic mastery 0–100, XP + levels, din-ki-streak, unlockable badges, weak topics ke liye 20-min study plan
+- 📐 **Math + diagrams** — KaTeX equations aur Mermaid diagrams chat me render (lazy-loaded, strict sanitization)
+- 👪 **Parent report** — weekly mastery deltas, streaks, weak topics, study plan + print view (child-safety visibility)
+- 🛡 **Child-safety guardrails** — prompt-injection filter (EN + Roman Hindi + Devanagari jailbreak patterns), self-harm safe-completion, AI-identity disclosure, no romantic/emotional framing, PII minimization
 - 🛡 **Demo armor** — per-IP daily token budget, friendly Hindi over-quota message (no surprise bills)
+
+> 🔒 **Privacy:** Guruji sirf nickname + class store karta hai — kabhi phone number, address, school ka naam ya photo nahi maangta. Saara student data per-student JSON me rehta hai; koi tracker/analytics nahi.
 
 ## Quick start (local)
 
@@ -61,13 +68,17 @@ Env vars (see `.env.example`): `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_
 ## Architecture
 
 ```
-web/ (React+Vite+Tailwind, /guruji/ on GitHub Pages)
+web/ (React+Vite+Tailwind, /guruji/ on GitHub Pages, violet-indigo premium theme)
   │  HTTPS + SSE
   ▼
 server/ (Express+TS, Render free tier, Singapore)
-  ├── agent.ts      — tutor loop: persona + tools (memory_search/add), max 3 iters
-  ├── llm.ts        — OpenAI-compatible client, 429/5xx retry, streaming
-  ├── quiz.ts       — MCQ generation (LLM JSON mode) + grading + weak-topic update
+  ├── agent.ts      — strict Socratic tutor loop (hint-ladder, few-shot dialogues, chapter citations)
+  ├── guard.ts      — prompt-injection + self-harm filters (EN/Roman-Hindi/Devanagari), zero-LLM refusals
+  ├── llm.ts        — OpenAI-compatible client, 429/5xx retry, streaming, LLM_MOCK=1 test mode
+  ├── quiz.ts       — adaptive MCQ generation (mastery-based difficulty) + grading + XP/streak/mastery
+  ├── srs.ts        — FSRS-lite spaced-repetition scheduler (deterministic, no LLM cost)
+  ├── mastery.ts    — per-topic mastery 0–100, XP, IST streaks, badges
+  ├── chapters.ts   — RAG-lite retrieval over data/chapters/ (14 original summaries, TF-IDF)
   ├── memory.ts     — per-student JSON store, atomic writes, keyword search
   └── budget.ts     — per-IP daily spend cap (atomic ip-spend.json, IST rollover)
 ```
@@ -84,9 +95,10 @@ No secrets in the repo — `LLM_API_KEY` is set in the Render dashboard only. Me
 ## Roadmap
 
 - [ ] Devanagari handwriting/photo questions (vision model)
-- [ ] Parent/teacher dashboard
+- [x] Parent report view (weekly mastery deltas + print)
 - [ ] Offline question bank for low-connectivity areas
 - [ ] More subjects (SST, English grammar)
+- [ ] Quiz topic off-syllabus filter (optional)
 
 ---
 

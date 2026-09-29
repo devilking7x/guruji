@@ -2,10 +2,14 @@ import express, { Request, Response, NextFunction } from "express";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as memory from "./memory";
+import * as srs from "./srs";
+import * as mastery from "./mastery";
+import { searchChapters } from "./chapters";
 import { runChat, BudgetError, BUDGET_HINDI_MSG } from "./agent";
 import { startQuiz, submitQuiz, QuizNotFoundError } from "./quiz";
-import { checkBudget } from "./budget";
+import { checkBudget, recordSpend } from "./budget";
 import { estimateTokens } from "./llm";
+import { checkSelfHarm, checkJailbreak } from "./guard";
 
 const app = express();
 app.set("trust proxy", true);
@@ -30,6 +34,20 @@ function clientIp(req: Request): string {
   const xff = req.headers["x-forwarded-for"];
   const first = Array.isArray(xff) ? xff[0] : (xff || "").split(",")[0];
   return (first || req.ip || "unknown").trim().slice(0, 64);
+}
+
+function badRequest(res: Response, message: string): void {
+  res.status(400).json({ error: "badRequest", message });
+}
+
+/**
+ * Strict studentId for the new (Round 2) endpoints: must be present and
+ * sanitize to a non-empty id. Returns null when invalid.
+ */
+function requireStudentId(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+  const sid = memory.sanitizeStudentId(raw);
+  return sid || null;
 }
 
 // ---------- health ----------
@@ -78,6 +96,26 @@ app.post("/api/chat", async (req: Request, res: Response) => {
   const m = mode === "revision" ? "revision" : "chat";
   const sid = memory.sanitizeStudentId(typeof studentId === "string" ? studentId : "anonymous") || "anonymous";
   const ip = clientIp(req);
+  const cleanMsg = message.trim();
+
+  // Server-side safety guards: self-harm + prompt-injection. These never call
+  // the LLM and never cost the real budget — only a tiny accounting entry so
+  // refusal loops can't be abused for free.
+  const crisis = checkSelfHarm(cleanMsg);
+  const jailbreak = crisis ? null : checkJailbreak(cleanMsg);
+  const guardReply = crisis ?? jailbreak;
+  if (guardReply) {
+    recordSpend(ip, 1, estimateTokens(guardReply));
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    res.write(`data: ${JSON.stringify({ t: "tok", x: guardReply })}\n\n`);
+    res.write(`data: ${JSON.stringify({ t: "done", inputTokens: 1, outputTokens: estimateTokens(guardReply) })}\n\n`);
+    res.end();
+    return;
+  }
 
   // Dry budget check BEFORE SSE headers so an over-quota client gets 429 JSON
   // per the contract (not a half-opened SSE stream). Read-only: runChat does
@@ -98,7 +136,7 @@ app.post("/api/chat", async (req: Request, res: Response) => {
 
   try {
     const result = await runChat({
-      message: message.trim(),
+      message: cleanMsg,
       studentId: sid,
       mode: m,
       ip,
@@ -124,8 +162,18 @@ app.post("/api/chat", async (req: Request, res: Response) => {
 app.post("/api/quiz/start", async (req: Request, res: Response) => {
   try {
     const { topic, studentId, count, classLevel } = req.body ?? {};
+    const topicStr = String(topic ?? "");
+    // Server-side guard on quiz topic (prompt is interpolated from it) —
+    // refuse without calling the LLM.
+    const crisis = checkSelfHarm(topicStr);
+    const jailbreak = crisis ? null : checkJailbreak(topicStr);
+    const guardReply = crisis ?? jailbreak;
+    if (guardReply) {
+      res.status(400).json({ error: "badRequest", message: guardReply });
+      return;
+    }
     const out = await startQuiz({
-      topic: String(topic ?? ""),
+      topic: topicStr,
       studentId: typeof studentId === "string" ? studentId : "anonymous",
       count: typeof count === "number" ? count : undefined,
       classLevel: typeof classLevel === "string" ? classLevel : undefined,
@@ -163,6 +211,99 @@ app.post("/api/quiz/submit", async (req: Request, res: Response) => {
       message: err instanceof Error ? err.message : "Quiz submit nahi ho paya.",
     });
   }
+});
+
+// ---------- revision queue (FSRS-lite) ----------
+app.post("/api/revision/cards", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.body?.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const cards = req.body?.cards;
+  if (!Array.isArray(cards) || cards.length === 0 || cards.length > 50) {
+    badRequest(res, "cards 1 se 50 items ki array honi chahiye.");
+    return;
+  }
+  const clean: Array<{ front: string; back: string; topic: string }> = [];
+  for (const c of cards) {
+    const front = typeof c?.front === "string" ? c.front.trim() : "";
+    const back = typeof c?.back === "string" ? c.back.trim() : "";
+    const topic = typeof c?.topic === "string" ? c.topic.trim().slice(0, 200) : "";
+    if (front.length < 1 || front.length > 2000 || back.length < 1 || back.length > 2000) {
+      badRequest(res, "Har card ka front/back 1-2000 characters ka hona chahiye.");
+      return;
+    }
+    clean.push({ front, back, topic });
+  }
+  try {
+    const out = srs.addCards(sid, clean);
+    res.status(200).json({ added: out.added });
+  } catch (err) {
+    badRequest(res, err instanceof Error ? err.message : "Cards add nahi ho paye.");
+  }
+});
+
+app.get("/api/revision/due", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.query.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const cards = srs.dueCards(sid).map((c) => ({
+    id: c.id,
+    front: c.front,
+    back: c.back,
+    topic: c.topic,
+  }));
+  res.status(200).json({ cards });
+});
+
+app.post("/api/revision/grade", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.body?.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const cardId = typeof req.body?.cardId === "string" ? req.body.cardId.trim() : "";
+  if (!cardId) {
+    badRequest(res, "cardId chahiye.");
+    return;
+  }
+  const rating = req.body?.rating;
+  if (!Number.isInteger(rating) || rating < 1 || rating > 4) {
+    badRequest(res, "Rating 1 se 4 ke beech honi chahiye.");
+    return;
+  }
+  try {
+    const out = srs.gradeCard(sid, cardId, rating);
+    if (!out) {
+      res.status(404).json({ error: "notFound", message: "Card nahi mila." });
+      return;
+    }
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    badRequest(res, err instanceof Error ? err.message : "Grade nahi ho paya.");
+  }
+});
+
+// ---------- chapters search (RAG-lite) ----------
+app.get("/api/chapters/search", (req: Request, res: Response) => {
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (q.length < 1 || q.length > 200) {
+    badRequest(res, "Search query 1-200 characters ki honi chahiye.");
+    return;
+  }
+  const hits = searchChapters(q, 3).map((h) => ({
+    id: h.chapter.id,
+    class: h.chapter.class,
+    subject: h.chapter.subject,
+    title: h.chapter.title,
+    keyPoints: h.chapter.keyPoints,
+    keyTerms: h.chapter.keyTerms,
+    score: Math.round(h.score * 100) / 100,
+  }));
+  res.status(200).json({ chapters: hits });
 });
 
 // ---------- progress ----------
@@ -208,11 +349,20 @@ app.get("/api/progress", (req: Request, res: Response) => {
     if (cl) classLevel = cl[1].trim();
   }
 
+  // Round 2: mastery/XP/streak/badges (server-side). weakTopics merges the
+  // v1 weak_topic memory records with mastery-based weak topics (<60).
+  const extras = mastery.progressExtras(sid);
+  const mergedWeak = [...new Set([...weak, ...extras.weakTopics])];
+
   res.status(200).json({
     student: { name, classLevel },
     topics,
     history,
-    weakTopics: weak,
+    weakTopics: mergedWeak,
+    mastery: extras.mastery,
+    xp: extras.xp,
+    streak: extras.streak,
+    badges: extras.badges,
   });
 });
 

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { atomicWriteJson } from "./fsutil";
 
-export type MemoryKind = "profile" | "fact" | "quiz_result" | "weak_topic";
+export type MemoryKind = "profile" | "fact" | "quiz_result" | "weak_topic" | "hint_ladder";
 
 export interface MemoryRecord {
   id: string;

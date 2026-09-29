@@ -236,11 +236,25 @@ export interface ProgressHistoryItem {
   total: number;
 }
 
+/** New in Round 2: quiz history with plain `date` field (v1 `history` still works as fallback). */
+export interface QuizHistoryItem {
+  date: string;
+  topic: string;
+  score: number;
+  total: number;
+}
+
 export interface ProgressData {
   student: { name: string | null; classLevel: string | number | null };
   topics: ProgressTopic[];
   history: ProgressHistoryItem[];
   weakTopics: string[];
+  /** Round 2 fields — optional so the UI degrades gracefully if the backend is older. */
+  mastery?: Record<string, number>;
+  xp?: number;
+  streak?: number;
+  badges?: string[];
+  quizHistory?: QuizHistoryItem[];
 }
 
 export async function getProgress(): Promise<ProgressData> {
@@ -279,4 +293,50 @@ export async function deleteMemory(id: string): Promise<void> {
     { method: "DELETE" }
   );
   if (!res.ok) await throwForStatus(res);
+}
+
+// ---------------------------------------------------------------- revision (FSRS flashcards)
+
+export interface RevisionCard {
+  id: string;
+  front: string;
+  back: string;
+  topic: string;
+}
+
+/** Cards due for review today. Contract: 200 {"cards":[{"id","front","back","topic"}]} */
+export async function getDueRevisionCards(): Promise<RevisionCard[]> {
+  const res = await fetch(
+    `${API}/api/revision/due?studentId=${encodeURIComponent(getStudentId())}`
+  );
+  if (!res.ok) await throwForStatus(res);
+  const data = await res.json();
+  return (data.cards ?? []) as RevisionCard[];
+}
+
+/** Grade a card: 1 = phir se, 3 = mushkil tha, 4 = aasaan tha. */
+export async function gradeRevisionCard(
+  cardId: string,
+  rating: 1 | 3 | 4
+): Promise<void> {
+  const res = await fetch(`${API}/api/revision/grade`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ studentId: getStudentId(), cardId, rating }),
+  });
+  if (!res.ok) await throwForStatus(res);
+}
+
+/** Add new cards (e.g. built from wrong quiz answers). Returns count added. */
+export async function addRevisionCards(
+  cards: { front: string; back: string; topic: string }[]
+): Promise<number> {
+  const res = await fetch(`${API}/api/revision/cards`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ studentId: getStudentId(), cards }),
+  });
+  if (!res.ok) await throwForStatus(res);
+  const data = await res.json();
+  return Number(data.added ?? 0);
 }

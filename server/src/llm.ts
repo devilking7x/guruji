@@ -68,12 +68,18 @@ interface ChatCompleteOpts {
 
 function mockReply(messages: ChatMessage[], opts: ChatCompleteOpts): ChatResult {
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const q = (lastUser?.content || "").slice(0, 120);
+  const userText = lastUser?.content || "";
+  const q = userText.slice(0, 120);
   let content: string;
   if (opts.jsonMode) {
     // Honor the requested question count so mock demos behave like the real LLM.
-    const m = (lastUser?.content || "").match(/Generate (\d+) multiple-choice/);
+    const m = userText.match(/Generate (\d+) multiple-choice/);
     const want = Math.min(10, Math.max(1, m ? parseInt(m[1], 10) : 2));
+    // Difficulty-aware mock: shift which bank questions are served so demos
+    // of easy/medium/hard actually differ.
+    const dm = userText.match(/Difficulty:\s*(easy|medium|hard)/i);
+    const diff = (dm ? dm[1].toLowerCase() : "medium") as "easy" | "medium" | "hard";
+    const offset = diff === "easy" ? 0 : diff === "hard" ? 4 : 2;
     const bank = [
       {
         question: "1/2 + 1/4 kitna hota hai?",
@@ -113,13 +119,16 @@ function mockReply(messages: ChatMessage[], opts: ChatCompleteOpts): ChatResult 
       },
     ];
     const items = [];
-    for (let i = 0; i < want; i++) items.push(bank[i % bank.length]);
+    for (let i = 0; i < want; i++) items.push(bank[(offset + i) % bank.length]);
     content = JSON.stringify(items);
   } else {
+    // Socratic hint-ladder mock: a guiding question + encouragement, NEVER the answer.
     content =
-      "Namaste! Main Guruji hoon, aapka Hindi tutor. " +
-      (q ? `Aapne poocha: "${q}". ` : "") +
-      "Main Maths aur Science (Class 6-10) padhata hoon. Pehle batao, aaj kya padhna hai?";
+      "Bahut achha sawal poocha! 👏 " +
+      (q ? `Tumne poocha: "${q}". ` : "") +
+      "Pehle khud socho — iska sabse pehla kadam kya hoga? 🤔 " +
+      "Apni soch ya apna jawab batao, phir main tumhe aage ka ishara dunga. " +
+      "Galti se mat daro — galti se hi seekhte hain! 💪";
   }
   return {
     content,
@@ -207,7 +216,7 @@ interface ChatStreamOpts {
 }
 
 const MOCK_STREAM_REPLY =
-  "Namaste! Main Guruji hoon. Aaj kya padhna hai — Maths ya Science?";
+  "Bahut achha sawal poocha! 👏 Pehle khud socho — iska sabse pehla kadam kya hoga? 🤔 Apni soch batao, phir main tumhe aage ka ishara dunga. Galti se mat daro — galti se hi seekhte hain! 💪";
 
 export async function chatStream(
   opts: ChatStreamOpts

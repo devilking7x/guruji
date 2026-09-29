@@ -4,10 +4,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        gold: "#d4af37",
-        golddeep: "#a8862a",
-        ink: "#0b0b10",
-        card: "#14141c",
+        ink: "#0A0A12",
+        card: "#101018",
+        // Primary accent: violet -> indigo gradient system
+        accent: "#8B5CF6",
+        accentdeep: "#6366F1",
+        accentlight: "#A78BFA",
+        // Success / positive
+        mint: "#10B981",
       },
     },
   },

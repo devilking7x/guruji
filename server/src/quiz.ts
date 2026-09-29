@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { chatComplete, estimateTokens } from "./llm";
 import * as memory from "./memory";
+import * as mastery from "./mastery";
+import { addCards } from "./srs";
 import { trySpend, recordSpend } from "./budget";
 import { BudgetError, BUDGET_HINDI_MSG } from "./agent";
 
@@ -56,9 +58,11 @@ const QUIZ_PROMPT = (
   topic: string,
   count: number,
   classLevel: string,
-  script: "roman" | "devanagari"
+  script: "roman" | "devanagari",
+  difficulty: mastery.Difficulty
 ) =>
   `Generate ${count} multiple-choice questions in simple Hindi (${script === "devanagari" ? "Devanagari script" : "Roman Hindi script"}) on the topic "${topic}", for class ${classLevel}. ` +
+  `Difficulty: ${difficulty} — the student's mastery on this topic is ${difficulty === "easy" ? "low, so ask basic concept-checking questions" : difficulty === "hard" ? "high, so ask tricky application-based questions" : "average, so ask standard questions"}. ` +
   `Keep technical English terms like "photosynthesis" in English. ` +
   `Return ONLY a JSON array (no code fences, no extra text) of objects: ` +
   `[{"question": "...", "options": ["a","b","c","d"], "answerIndex": 0, "explanation": "..."}]. ` +
@@ -80,6 +84,9 @@ export async function startQuiz(opts: StartQuizOpts): Promise<StartQuizResult> {
   const pre = trySpend(ip, estimateTokens(topic) + 500, 0);
   if (!pre.ok) throw new BudgetError(BUDGET_HINDI_MSG);
 
+  // Adaptive difficulty from the student's per-topic mastery.
+  const difficulty = mastery.difficultyFor(studentId, topic);
+
   let items: QuizItem[];
   let inputTokens = 0;
   let outputTokens = 0;
@@ -93,7 +100,7 @@ export async function startQuiz(opts: StartQuizOpts): Promise<StartQuizResult> {
         },
         {
           role: "user",
-          content: QUIZ_PROMPT(topic, count, classLevel, devanagari(topic) ? "devanagari" : "roman"),
+          content: QUIZ_PROMPT(topic, count, classLevel, devanagari(topic) ? "devanagari" : "roman", difficulty),
         },
       ],
       maxTokens: 2000,
@@ -149,6 +156,12 @@ interface SubmitQuizResult {
   }>;
   weakTopics: string[];
   message: string;
+  // Round 2 additions (v1 fields above are unchanged).
+  xpGained: number;
+  xp: number;
+  streak: number;
+  mastery: number;
+  badges: string[];
 }
 
 export async function submitQuiz(opts: SubmitQuizOpts): Promise<SubmitQuizResult> {
@@ -199,6 +212,27 @@ export async function submitQuiz(opts: SubmitQuizOpts): Promise<SubmitQuizResult
   // One-shot quiz: remove it after submission.
   quizzes.delete(opts.quizId);
 
+  // Round 2: mastery/XP/streak update (server-side).
+  const correctFlags = results.map((r) => r.correct);
+  const mres = mastery.recordQuiz(studentId, quiz.topic, correctFlags);
+
+  // Round 2: FSRS hook — auto-create a revision card for each wrong answer.
+  const wrongItems = quiz.items.filter((_, i) => !correctFlags[i]);
+  if (wrongItems.length > 0) {
+    try {
+      addCards(
+        studentId,
+        wrongItems.map((it) => ({
+          front: it.question,
+          back: `Sahi jawab: ${it.options[it.answerIndex]}. ${it.explanation}`,
+          topic: quiz.topic,
+        }))
+      );
+    } catch {
+      // revision-card creation must never fail the quiz submit
+    }
+  }
+
   const message =
     pct >= 80
       ? "Bahut badhiya! Tumne kamaal kar diya. Aise hi aage badho! 🎉"
@@ -206,7 +240,18 @@ export async function submitQuiz(opts: SubmitQuizOpts): Promise<SubmitQuizResult
         ? "Achha prayas! Thodi aur practice karo, tum aur behtar kar sakte ho. 💪"
         : "Koi baat nahi, galtiyon se hi seekhte hain. Revision mode me is topic ko phir se padhte hain. 📚";
 
-  return { score, total, results, weakTopics, message };
+  return {
+    score,
+    total,
+    results,
+    weakTopics,
+    message,
+    xpGained: mres.xpGained,
+    xp: mres.xp,
+    streak: mres.streak,
+    mastery: mres.mastery,
+    badges: mres.badges,
+  };
 }
 
 export class QuizNotFoundError extends Error {
