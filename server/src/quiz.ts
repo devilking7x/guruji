@@ -5,6 +5,7 @@ import * as mastery from "./mastery";
 import { addCards } from "./srs";
 import { trySpend, recordSpend } from "./budget";
 import { BudgetError, BUDGET_HINDI_MSG } from "./agent";
+import { touch as touchLeaderboard } from "./leaderboard";
 
 export interface QuizQuestionPublic {
   id: string;
@@ -12,7 +13,7 @@ export interface QuizQuestionPublic {
   options: string[];
 }
 
-interface QuizItem extends QuizQuestionPublic {
+export interface QuizItem extends QuizQuestionPublic {
   answerIndex: number;
   explanation: string;
 }
@@ -68,20 +69,35 @@ const QUIZ_PROMPT = (
   `[{"question": "...", "options": ["a","b","c","d"], "answerIndex": 0, "explanation": "..."}]. ` +
   `Each question must have exactly 4 options and answerIndex 0-3.`;
 
-export async function startQuiz(opts: StartQuizOpts): Promise<StartQuizResult> {
+interface GenerateQuestionOpts {
+  topic: string;
+  count: number;
+  classLevel: string;
+  studentId: string;
+  ip: string;
+  /** override the LLM max_tokens (worksheets ask for more questions) */
+  maxTokens?: number;
+  /** estimated output tokens for the budget pre-check */
+  outputEstimate?: number;
+}
+
+/**
+ * Shared question generator used by /api/quiz/start and /api/worksheet.
+ * Budget-checked (429 on over-quota); falls back to the built-in bank for
+ * known topics when the LLM fails. Returns items WITH answers — callers
+ * that face the client must strip answerIndex.
+ */
+export async function generateQuestionItems(opts: GenerateQuestionOpts): Promise<QuizItem[]> {
   const topic = (opts.topic || "").trim();
-  if (topic.length < 1 || topic.length > 200) {
-    throw new Error("Topic 1 se 200 characters ke beech hona chahiye.");
+  if (topic.length < 1 || topic.length > 500) {
+    throw new Error("Topic 1 se 500 characters ke beech hona chahiye.");
   }
-  const count =
-    typeof opts.count === "number" && opts.count >= 3 && opts.count <= 10
-      ? Math.floor(opts.count)
-      : 5;
+  const count = Math.min(20, Math.max(1, Math.floor(opts.count) || 5));
   const classLevel = (opts.classLevel || "8").trim().slice(0, 10);
   const studentId = memory.sanitizeStudentId(opts.studentId || "anonymous");
   const ip = opts.ip || "unknown";
 
-  const pre = trySpend(ip, estimateTokens(topic) + 500, 0);
+  const pre = trySpend(ip, estimateTokens(topic) + 500, opts.outputEstimate ?? 0);
   if (!pre.ok) throw new BudgetError(BUDGET_HINDI_MSG);
 
   // Adaptive difficulty from the student's per-topic mastery.
@@ -103,7 +119,7 @@ export async function startQuiz(opts: StartQuizOpts): Promise<StartQuizResult> {
           content: QUIZ_PROMPT(topic, count, classLevel, devanagari(topic) ? "devanagari" : "roman", difficulty),
         },
       ],
-      maxTokens: 2000,
+      maxTokens: opts.maxTokens ?? 2000,
       jsonMode: true,
     });
     inputTokens = res.inputTokens;
@@ -112,11 +128,36 @@ export async function startQuiz(opts: StartQuizOpts): Promise<StartQuizResult> {
     recordSpend(ip, inputTokens, outputTokens);
   } catch (err) {
     if (err instanceof BudgetError) throw err;
-    // Fallback to built-in bank for known topics.
+    // Fallback to built-in bank for known topics (repeated to fill count).
     const bank = fallbackBank(topic);
     if (!bank) throw err;
-    items = bank;
+    items = [];
+    while (items.length < count) items.push(...bank);
+    items = items.slice(0, count);
   }
+  return items;
+}
+
+export async function startQuiz(opts: StartQuizOpts): Promise<StartQuizResult> {
+  const topic = (opts.topic || "").trim();
+  if (topic.length < 1 || topic.length > 200) {
+    throw new Error("Topic 1 se 200 characters ke beech hona chahiye.");
+  }
+  const count =
+    typeof opts.count === "number" && opts.count >= 3 && opts.count <= 10
+      ? Math.floor(opts.count)
+      : 5;
+  const classLevel = (opts.classLevel || "8").trim().slice(0, 10);
+  const studentId = memory.sanitizeStudentId(opts.studentId || "anonymous");
+  const ip = opts.ip || "unknown";
+
+  const items = await generateQuestionItems({
+    topic,
+    count,
+    classLevel,
+    studentId,
+    ip,
+  });
 
   const quizId = randomUUID();
   const withIds = items.map((it) => ({ ...it, id: randomUUID() }));
@@ -215,6 +256,13 @@ export async function submitQuiz(opts: SubmitQuizOpts): Promise<SubmitQuizResult
   // Round 2: mastery/XP/streak update (server-side).
   const correctFlags = results.map((r) => r.correct);
   const mres = mastery.recordQuiz(studentId, quiz.topic, correctFlags);
+
+  // Round 3: refresh the class leaderboard after every XP award.
+  try {
+    touchLeaderboard(studentId);
+  } catch {
+    // leaderboard refresh must never fail the quiz submit
+  }
 
   // Round 2: FSRS hook — auto-create a revision card for each wrong answer.
   const wrongItems = quiz.items.filter((_, i) => !correctFlags[i]);

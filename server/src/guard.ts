@@ -14,6 +14,7 @@ const JAILBREAK_PATTERNS: RegExp[] = [
   /(दिखाओ|बताओ).{0,30}सिस्टम\s*प्रॉम्प्ट/,
   /पिछले\s*निर्देश.{0,30}(भूल|भुला|ignore)/,
   /(भूल\s*जाओ|भुला\s*दो).{0,30}(निर्देश|नियम)/,
+  /(निर्देशों?|नियमों?).{0,30}(भूल\s*जाओ|भुला\s*दो|भूलो|भुलाओ)/,
   /\bdan\b.{0,20}(mode|do anything now)|do anything now/i,
   /jailbreak/i,
   /developer\s+mode/i,
@@ -28,7 +29,7 @@ const JAILBREAK_PATTERNS: RegExp[] = [
   /apne\s+niyam\s+(bhool|tod|todo)/i,
   /\boverride\b.{0,20}(instructions|safety)/i,
   /(girlfriend|boyfriend|pati|patni)\s+bano/i,
-  /i\s+love\s+you|love\s+you\s+guruji/i,
+  /i[\s_-]+love[\s_-]+you|love[\s_-]+you[\s_-]+guruji/i,
   /mujhse\s+(pyaar|shaadi)/i,
 ];
 
@@ -38,7 +39,9 @@ const JAILBREAK_PATTERNS: RegExp[] = [
  */
 const SELF_HARM_PATTERNS: RegExp[] = [
   /marna\s+(hai|chahta|chahti|chahunga|chahungi|chahta\s+hoon)/i,
+  /mar\s+(jana|jaana|jaunga|jaungi|jaana\s+chahta|jana\s+chahta)/i,
   /मरना\s+(है|चाहता|चाहती|चाहूँगा|चाहूँगी)/,
+  /मर\s+(जाना|जाऊंगा|जाऊंगी)/,
   /suicide/i,
   /khudkushi|खुदकुशी/,
   /आत्महत्या/,

@@ -4,12 +4,20 @@ import { join } from "node:path";
 import * as memory from "./memory";
 import * as srs from "./srs";
 import * as mastery from "./mastery";
-import { searchChapters } from "./chapters";
+import { searchChapters, loadChapters } from "./chapters";
 import { runChat, BudgetError, BUDGET_HINDI_MSG } from "./agent";
-import { startQuiz, submitQuiz, QuizNotFoundError } from "./quiz";
-import { checkBudget, recordSpend } from "./budget";
+import { startQuiz, submitQuiz, generateQuestionItems, QuizNotFoundError } from "./quiz";
+import { checkBudget, recordSpend, istDayKey } from "./budget";
 import { estimateTokens } from "./llm";
 import { checkSelfHarm, checkJailbreak } from "./guard";
+// Round 3 modules.
+import { checkCopy } from "./copycheck";
+import * as planner from "./planner";
+import * as nickname from "./nickname";
+import * as challenge from "./challenge";
+import * as leaderboard from "./leaderboard";
+import { teacherStats } from "./teacher";
+import { getBoundary, parseMultipart, decodeField, detectImageMime } from "./multipart";
 
 const app = express();
 app.set("trust proxy", true);
@@ -18,7 +26,7 @@ app.use(express.json({ limit: "1mb" }));
 // CORS allow-all.
 app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") {
     res.sendStatus(204);
@@ -48,6 +56,50 @@ function requireStudentId(raw: unknown): string | null {
   if (typeof raw !== "string" || raw.trim().length === 0) return null;
   const sid = memory.sanitizeStudentId(raw);
   return sid || null;
+}
+
+/** Guruji serves Classes 6-10. */
+function validClassLevel(cls: unknown): string | null {
+  const c = String(cls ?? "").trim();
+  return /^(6|7|8|9|10)$/.test(c) ? c : null;
+}
+
+/** Guard helper: returns the refusal text or null when input is clean. */
+function guardText(text: string): string | null {
+  return checkSelfHarm(text) ?? checkJailbreak(text);
+}
+
+/** Read the raw request body (for multipart routes express.json skips). */
+function readRawBody(req: Request, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let done = false;
+    const fail = (err: Error) => {
+      if (done) return;
+      done = true;
+      try {
+        req.destroy();
+      } catch {
+        // ignore
+      }
+      reject(err);
+    };
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > maxBytes) {
+        fail(new Error("body-too-large"));
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      if (done) return;
+      done = true;
+      resolve(Buffer.concat(chunks));
+    });
+    req.on("error", (e) => fail(e instanceof Error ? e : new Error("body-read-error")));
+  });
 }
 
 // ---------- health ----------
@@ -80,9 +132,16 @@ app.post("/api/student", (req: Request, res: Response) => {
     if (rec.kind === "profile") memory.markSupersededIfExists(sid, "profile", rec.text.slice(0, 20));
   }
   memory.add(sid, `Naam: ${name.trim()}, Class: ${cls}`, "profile");
+  // Round 3: every student gets an auto-generated anonymous nickname.
+  let nick = "";
+  try {
+    nick = nickname.getNickname(sid).nickname;
+  } catch {
+    // nickname must never fail student creation
+  }
   res.status(200).json({
     ok: true,
-    student: { studentId: sid, name: name.trim(), classLevel: cls },
+    student: { studentId: sid, name: name.trim(), classLevel: cls, nickname: nick },
   });
 });
 
@@ -211,6 +270,409 @@ app.post("/api/quiz/submit", async (req: Request, res: Response) => {
       message: err instanceof Error ? err.message : "Quiz submit nahi ho paya.",
     });
   }
+});
+
+// ---------- copycheck (Round 3) ----------
+// Privacy: the image is processed IN MEMORY and discarded — never written to
+// disk, never logged. Strict type/size checks via declared type + magic bytes.
+const COPYCHECK_MAX_FILE_BYTES = 5 * 1024 * 1024;
+const COPYCHECK_MAX_BODY_BYTES = 6500000;
+
+app.post("/api/copycheck", async (req: Request, res: Response) => {
+  const reject = (message: string) => res.status(400).json({ ok: false, error: message });
+  try {
+    const ctHeader = req.headers["content-type"];
+    const boundary = getBoundary(Array.isArray(ctHeader) ? ctHeader[0] : ctHeader);
+    if (!boundary) {
+      reject("multipart/form-data body with boundary chahiye.");
+      return;
+    }
+    let raw: Buffer;
+    try {
+      raw = await readRawBody(req, COPYCHECK_MAX_BODY_BYTES);
+    } catch {
+      reject("File bahut badi hai — image 5MB se chhoti honi chahiye.");
+      return;
+    }
+    const { fields, files } = parseMultipart(raw, boundary);
+    const file = files.find((f) => f.fieldName === "photo");
+    if (!file || file.data.length === 0) {
+      reject("photo field me image file chahiye.");
+      return;
+    }
+    if (file.data.length > COPYCHECK_MAX_FILE_BYTES) {
+      reject("Image 5MB se chhoti honi chahiye.");
+      return;
+    }
+    // Declared type AND magic bytes must both agree it's jpeg/png/webp.
+    const declared = file.contentType.replace("image/jpg", "image/jpeg");
+    const magic = detectImageMime(file.data);
+    if (
+      !magic ||
+      (declared !== "image/jpeg" && declared !== "image/png" && declared !== "image/webp")
+    ) {
+      reject("Sirf JPEG, PNG ya WebP image allowed hai.");
+      return;
+    }
+    const sid = requireStudentId(decodeField(fields.studentId ?? ""));
+    if (!sid) {
+      reject("Valid studentId chahiye.");
+      return;
+    }
+    const cls = validClassLevel(decodeField(fields.class ?? ""));
+    if (!cls) {
+      reject("Class 6 se 10 ke beech honi chahiye.");
+      return;
+    }
+    const subject = decodeField(fields.subject ?? "").trim().slice(0, 100);
+    if (!subject) {
+      reject("Subject chahiye.");
+      return;
+    }
+    const guardReply = guardText(subject);
+    if (guardReply) {
+      reject(guardReply);
+      return;
+    }
+
+    const out = await checkCopy({
+      studentId: sid,
+      classLevel: cls,
+      subject,
+      imageBase64: file.data.toString("base64"),
+      mimeType: magic,
+      ip: clientIp(req),
+    });
+    // file + raw go out of scope here: the image is discarded, never persisted.
+    res.status(200).json({ ok: true, feedback: out.feedback });
+  } catch (err) {
+    if (err instanceof BudgetError) {
+      res.status(429).json({ ok: false, error: "budgetExceeded", message: err.message });
+      return;
+    }
+    console.error("copycheck error:", err instanceof Error ? err.message : err);
+    res.status(500).json({ ok: false, error: "Copy check nahi ho paya. Thodi der baad phir try karo." });
+  }
+});
+
+// ---------- planner (Round 3) ----------
+app.post("/api/planner", async (req: Request, res: Response) => {
+  try {
+    const sid = requireStudentId(req.body?.studentId);
+    if (!sid) {
+      badRequest(res, "Valid studentId chahiye.");
+      return;
+    }
+    const cls = validClassLevel(req.body?.class);
+    if (!cls) {
+      badRequest(res, "Class 6 se 10 ke beech honi chahiye.");
+      return;
+    }
+    const chapters = req.body?.chapters;
+    if (!Array.isArray(chapters) || chapters.length === 0 || chapters.length > 20) {
+      badRequest(res, "chapters 1 se 20 chapter ids ki array honi chahiye.");
+      return;
+    }
+    for (const c of chapters) {
+      if (typeof c !== "string" || c.trim().length === 0 || c.trim().length > 100) {
+        badRequest(res, "Har chapter id 1-100 characters ki string honi chahiye.");
+        return;
+      }
+    }
+    const v = planner.validateChapterIds(chapters);
+    if (!v.ok) {
+      badRequest(res, v.error ?? "Chapter ids galat hain.");
+      return;
+    }
+    const days = req.body?.days;
+    if (!Number.isInteger(days) || days < 1 || days > 60) {
+      badRequest(res, "days 1 se 60 ke beech hona chahiye.");
+      return;
+    }
+    const mpd = req.body?.minutesPerDay;
+    if (!Number.isInteger(mpd) || mpd < 10 || mpd > 300) {
+      badRequest(res, "minutesPerDay 10 se 300 ke beech hona chahiye.");
+      return;
+    }
+    const plan = await planner.generatePlan({
+      studentId: sid,
+      classLevel: cls,
+      chapterIds: chapters,
+      days,
+      minutesPerDay: mpd,
+      ip: clientIp(req),
+    });
+    res.status(200).json({ ok: true, plan });
+  } catch (err) {
+    if (err instanceof BudgetError) {
+      res.status(429).json({ error: "budgetExceeded", message: err.message });
+      return;
+    }
+    badRequest(res, err instanceof Error ? err.message : "Plan nahi ban paya.");
+  }
+});
+
+app.get("/api/planner", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.query.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  res.status(200).json({ ok: true, plan: planner.loadPlan(sid) });
+});
+
+app.patch("/api/planner", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.body?.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const day = req.body?.day;
+  const taskIndex = req.body?.taskIndex;
+  const done = req.body?.done;
+  if (!Number.isInteger(day) || day < 1) {
+    badRequest(res, "day 1 se shuru hone wala integer hona chahiye.");
+    return;
+  }
+  if (!Number.isInteger(taskIndex) || taskIndex < 0) {
+    badRequest(res, "taskIndex 0 ya usse bada integer hona chahiye.");
+    return;
+  }
+  if (typeof done !== "boolean") {
+    badRequest(res, "done boolean hona chahiye.");
+    return;
+  }
+  const ok = planner.toggleTask(sid, day, taskIndex, done);
+  if (!ok) {
+    res.status(404).json({ error: "notFound", message: "Plan ya task nahi mila." });
+    return;
+  }
+  res.status(200).json({ ok: true });
+});
+
+// ---------- worksheet (Round 3) ----------
+// Reuses quiz.ts question generation; answers are stripped server-side —
+// the client only ever sees {n, q, hint}.
+app.post("/api/worksheet", async (req: Request, res: Response) => {
+  try {
+    const sid = requireStudentId(req.body?.studentId);
+    if (!sid) {
+      badRequest(res, "Valid studentId chahiye.");
+      return;
+    }
+    const cls = validClassLevel(req.body?.class);
+    if (!cls) {
+      badRequest(res, "Class 6 se 10 ke beech honi chahiye.");
+      return;
+    }
+    const count = req.body?.count === undefined ? 10 : req.body.count;
+    if (!Number.isInteger(count) || count < 1 || count > 20) {
+      badRequest(res, "count 1 se 20 ke beech hona chahiye.");
+      return;
+    }
+    const chapterIdRaw = req.body?.chapterId;
+    const topicsRaw = req.body?.topics;
+    let topic: string;
+    let title: string;
+    if (typeof chapterIdRaw === "string" && chapterIdRaw.trim()) {
+      const ch = loadChapters().find((c) => c.id === chapterIdRaw.trim().toLowerCase());
+      if (!ch) {
+        badRequest(res, "Chapter id galat hai.");
+        return;
+      }
+      topic = ch.title;
+      title = `Worksheet — ${ch.title} (Class ${cls})`;
+    } else if (Array.isArray(topicsRaw) && topicsRaw.length > 0) {
+      if (topicsRaw.length > 10) {
+        badRequest(res, "Zyada se zyada 10 topics.");
+        return;
+      }
+      const clean: string[] = [];
+      for (const t of topicsRaw) {
+        const s = String(t ?? "").trim();
+        if (s.length < 1 || s.length > 200) {
+          badRequest(res, "Har topic 1-200 characters ka hona chahiye.");
+          return;
+        }
+        const guardReply = guardText(s);
+        if (guardReply) {
+          res.status(400).json({ error: "badRequest", message: guardReply });
+          return;
+        }
+        clean.push(s);
+      }
+      topic = clean.join(", ");
+      title = `Worksheet — ${clean.slice(0, 2).join(", ")}${clean.length > 2 ? ", ..." : ""} (Class ${cls})`;
+    } else {
+      badRequest(res, "chapterId ya topics me se ek chahiye.");
+      return;
+    }
+    const items = await generateQuestionItems({
+      topic,
+      count,
+      classLevel: cls,
+      studentId: sid,
+      ip: clientIp(req),
+      maxTokens: Math.min(4000, 300 * count),
+      outputEstimate: 120 * count,
+    });
+    res.status(200).json({
+      ok: true,
+      title,
+      class: cls,
+      questions: items.map((it, i) => ({
+        n: i + 1,
+        q: it.question,
+        hint: it.explanation.slice(0, 200),
+      })),
+    });
+  } catch (err) {
+    if (err instanceof BudgetError) {
+      res.status(429).json({ error: "budgetExceeded", message: err.message });
+      return;
+    }
+    badRequest(res, err instanceof Error ? err.message : "Worksheet nahi ban payi.");
+  }
+});
+
+// ---------- teacher stats (Round 3: aggregates only, k-anonymity) ----------
+app.get("/api/teacher/stats", (req: Request, res: Response) => {
+  const cls = validClassLevel(req.query.class);
+  if (!cls) {
+    badRequest(res, "class query param 6 se 10 ke beech hona chahiye.");
+    return;
+  }
+  res.status(200).json(teacherStats(cls));
+});
+
+// ---------- nicknames (Round 3: anonymous identity) ----------
+app.get("/api/nickname", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.query.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const out = nickname.getNickname(sid);
+  res.status(200).json({ ok: true, nickname: out.nickname, canChange: out.canChange });
+});
+
+app.post("/api/nickname", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.body?.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const nn = typeof req.body?.nickname === "string" ? req.body.nickname.trim() : "";
+  if (!nickname.isValidNickname(nn)) {
+    badRequest(res, "Nickname 3-20 characters ka hona chahiye (Hindi/Roman akshar, number, - ya _).");
+    return;
+  }
+  const guardReply = guardText(nn);
+  if (guardReply) {
+    res.status(400).json({ error: "badRequest", message: guardReply });
+    return;
+  }
+  try {
+    const out = nickname.setNickname(sid, nn);
+    res.status(200).json({ ok: true, nickname: out.nickname });
+  } catch (err) {
+    badRequest(res, err instanceof Error ? err.message : "Nickname set nahi ho paya.");
+  }
+});
+
+// ---------- daily challenge (Round 3) ----------
+app.get("/api/challenge/today", async (req: Request, res: Response) => {
+  const sid = requireStudentId(req.query.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const cls = validClassLevel(req.query.class);
+  if (!cls) {
+    badRequest(res, "class query param 6 se 10 ke beech hona chahiye.");
+    return;
+  }
+  try {
+    const q = await challenge.ensureTodayQuestion(cls, clientIp(req));
+    res.status(200).json({
+      ok: true,
+      date: istDayKey(),
+      question: challenge.publicQuestion(q),
+      alreadyAnswered: challenge.answeredToday(sid, cls),
+    });
+  } catch (err) {
+    if (err instanceof BudgetError) {
+      res.status(429).json({ error: "budgetExceeded", message: err.message });
+      return;
+    }
+    console.error("challenge error:", err instanceof Error ? err.message : err);
+    res.status(500).json({ error: "internal", message: "Challenge nahi mil paya." });
+  }
+});
+
+app.post("/api/challenge/answer", async (req: Request, res: Response) => {
+  try {
+    const sid = requireStudentId(req.body?.studentId);
+    if (!sid) {
+      badRequest(res, "Valid studentId chahiye.");
+      return;
+    }
+    const cls = validClassLevel(req.body?.class);
+    if (!cls) {
+      badRequest(res, "Class 6 se 10 ke beech honi chahiye.");
+      return;
+    }
+    const questionId =
+      typeof req.body?.questionId === "string" ? req.body.questionId.trim().slice(0, 100) : "";
+    if (!questionId) {
+      badRequest(res, "questionId chahiye.");
+      return;
+    }
+    const answer = req.body?.answer;
+    if (!Number.isInteger(answer) || answer < 0 || answer > 3) {
+      badRequest(res, "answer 0 se 3 ke beech integer hona chahiye.");
+      return;
+    }
+    const q = await challenge.ensureTodayQuestion(cls, clientIp(req));
+    if (q.id !== questionId) {
+      badRequest(res, "Ye sawal aaj ka challenge nahi hai.");
+      return;
+    }
+    if (challenge.answeredToday(sid, cls)) {
+      badRequest(res, "Aaj ka challenge tum pehle hi khel chuke ho. Kal phir aana!");
+      return;
+    }
+    const correct = answer === q.answerIndex;
+    challenge.recordAnswer(sid, cls, q.id, correct);
+    const xp = mastery.awardChallengeXp(sid, correct);
+    try {
+      leaderboard.touch(sid);
+    } catch {
+      // leaderboard refresh must never fail the answer
+    }
+    res.status(200).json({ ok: true, correct, xpAwarded: xp.xpGained });
+  } catch (err) {
+    if (err instanceof BudgetError) {
+      res.status(429).json({ error: "budgetExceeded", message: err.message });
+      return;
+    }
+    console.error("challenge answer error:", err instanceof Error ? err.message : err);
+    res.status(500).json({ error: "internal", message: "Jawab save nahi ho paya." });
+  }
+});
+
+// ---------- leaderboard (Round 3: nicknames only, never ids) ----------
+app.get("/api/leaderboard", (req: Request, res: Response) => {
+  const cls = validClassLevel(req.query.class);
+  if (!cls) {
+    badRequest(res, "class query param 6 se 10 ke beech hona chahiye.");
+    return;
+  }
+  res.status(200).json({
+    ok: true,
+    week: leaderboard.isoWeekLabel(),
+    entries: leaderboard.topForClass(cls, 10),
+  });
 });
 
 // ---------- revision queue (FSRS-lite) ----------

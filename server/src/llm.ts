@@ -40,6 +40,8 @@ export interface ChatResult {
 const BASE_URL = (process.env.LLM_BASE_URL || "https://api.tokenfactory.nebius.com/v1").replace(/\/+$/, "");
 const API_KEY = process.env.LLM_API_KEY || "";
 const MODEL = process.env.LLM_MODEL || "meta-llama/Llama-3.3-70B-Instruct";
+// Vision-capable model for /api/copycheck (image input). Override via env.
+const VISION_MODEL = process.env.NEBIUS_VISION_MODEL || "Qwen/Qwen2.5-VL-72B-Instruct";
 
 const MOCK = () => process.env.LLM_MOCK === "1";
 
@@ -73,8 +75,9 @@ function mockReply(messages: ChatMessage[], opts: ChatCompleteOpts): ChatResult 
   let content: string;
   if (opts.jsonMode) {
     // Honor the requested question count so mock demos behave like the real LLM.
+    // Cap at 20: worksheet generation may ask for up to 20 questions.
     const m = userText.match(/Generate (\d+) multiple-choice/);
-    const want = Math.min(10, Math.max(1, m ? parseInt(m[1], 10) : 2));
+    const want = Math.min(20, Math.max(1, m ? parseInt(m[1], 10) : 2));
     // Difficulty-aware mock: shift which bank questions are served so demos
     // of easy/medium/hard actually differ.
     const dm = userText.match(/Difficulty:\s*(easy|medium|hard)/i);
@@ -153,7 +156,66 @@ export async function chatComplete(opts: ChatCompleteOpts): Promise<ChatResult> 
     ...(opts.jsonMode ? { response_format: { type: "json_object" } } : {}),
     ...(opts.tools ? { tools: opts.tools, tool_choice: "auto" } : {}),
   };
+  return postWithRetry(body);
+}
 
+export type VisionMime = "image/jpeg" | "image/png" | "image/webp";
+
+export interface VisionCompleteOpts {
+  system: string;
+  prompt: string;
+  imageBase64: string;
+  mimeType: VisionMime;
+  maxTokens?: number;
+}
+
+// Mock-mode Socratic copy feedback: identifies a first-step slip, asks ONE
+// guiding question, praises effort — NEVER reveals a full solution.
+const MOCK_COPYCHECK_FEEDBACK =
+  "Bahut badhiya prayas! 👏 Tumne poora sawal hal karne ki himmat dikhai — yehi sabse badi baat hai. " +
+  "Maine tumhari copy dekhi: **pehle step me** hi ek chhoti si galti hai — zara dobara gaur se dekho, " +
+  "kya tumne wahan sahi sankhya ya chinh likha hai? 🤔 Ek ishara: sawal ko ek baar phir dheere padho " +
+  "aur socho — sabse pehle kya karna chahiye tha? Apna naya jawab batao, phir hum agla kadam dekhenge. " +
+  "Galti se mat daro — yahi se seekh pakki hoti hai! 💪";
+
+/**
+ * Vision completion (image input) for /api/copycheck. Mock mode returns a
+ * canned Socratic Hindi reply with a generous input-token estimate (images
+ * cost more than text) — zero network.
+ */
+export async function visionComplete(opts: VisionCompleteOpts): Promise<ChatResult> {
+  if (isMock()) {
+    return {
+      content: MOCK_COPYCHECK_FEEDBACK,
+      inputTokens: 2500, // generous estimate: image tokens cost more
+      outputTokens: estimateTokens(MOCK_COPYCHECK_FEEDBACK),
+    };
+  }
+  const body: Record<string, unknown> = {
+    model: VISION_MODEL,
+    messages: [
+      { role: "system", content: opts.system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: opts.prompt },
+          {
+            type: "image_url",
+            image_url: { url: `data:${opts.mimeType};base64,${opts.imageBase64}` },
+          },
+        ],
+      },
+    ],
+    max_tokens: opts.maxTokens ?? 600,
+  };
+  return postWithRetry(body);
+}
+
+/**
+ * Shared POST /chat/completions with exponential-backoff retries (429/5xx),
+ * JSON parsing and usage extraction.
+ */
+async function postWithRetry(body: Record<string, unknown>): Promise<ChatResult> {
   let lastErr: Error | null = null;
   const delays = [500, 1000, 2000]; // exponential backoff, up to 3 retries
   for (let attempt = 0; attempt <= 3; attempt++) {

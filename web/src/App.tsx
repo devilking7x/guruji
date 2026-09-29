@@ -25,16 +25,37 @@ import {
 } from "./chat/voice";
 import RevisionView from "./views/RevisionView";
 import ParentReport from "./views/ParentReport";
+import CopyCheckView from "./views/CopyCheckView";
+import PlannerView from "./views/PlannerView";
+import WorksheetView from "./views/WorksheetView";
+import TeacherView from "./views/TeacherView";
+import ChallengeView from "./views/ChallengeView";
 
-type Tab = "chat" | "quiz" | "revision" | "progress" | "parent" | "memory";
+type Tab =
+  | "chat"
+  | "quiz"
+  | "revision"
+  | "progress"
+  | "parent"
+  | "memory"
+  | "copycheck"
+  | "planner"
+  | "worksheet"
+  | "teacher"
+  | "challenge";
 
-const TABS: { id: Tab; label: string }[] = [
+const TABS: { id: Tab; label: string; isNew?: boolean }[] = [
   { id: "chat", label: "💬 Chat" },
   { id: "quiz", label: "📝 Quiz" },
   { id: "revision", label: "🃏 Revision" },
   { id: "progress", label: "📊 Progress" },
   { id: "parent", label: "👪 Mata-Pita" },
   { id: "memory", label: "🧠 Yaadein" },
+  { id: "copycheck", label: "📸 Copy check", isNew: true },
+  { id: "planner", label: "🗓 Planner", isNew: true },
+  { id: "worksheet", label: "📝 Worksheet", isNew: true },
+  { id: "teacher", label: "👩‍🏫 Teacher", isNew: true },
+  { id: "challenge", label: "🏆 Challenge", isNew: true },
 ];
 
 function fmtDate(iso: string | null): string {
@@ -1132,13 +1153,24 @@ export default function App() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`rounded-xl px-2 py-2.5 text-sm font-semibold border transition-colors ${
+              className={`relative rounded-xl px-2 py-2.5 text-sm font-semibold border transition-colors ${
                 tab === t.id
                   ? "bg-gradient-to-r from-accent to-accentdeep text-white border-transparent"
                   : "bg-white/5 text-white/70 border-white/10 hover:border-accent/60 hover:text-accentlight"
               }`}
             >
               {t.label}
+              {t.isNew && (
+                <span
+                  className={`absolute -top-2 -right-1 text-[10px] font-bold rounded-full px-1.5 py-0.5 ${
+                    tab === t.id
+                      ? "bg-white text-accentdeep"
+                      : "bg-gradient-to-r from-accent to-accentdeep text-white"
+                  }`}
+                >
+                  ✨ Naya
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -1176,6 +1208,23 @@ export default function App() {
             />
           )}
           {tab === "memory" && <MemoryView />}
+          {tab === "copycheck" && (
+            <CopyCheckView
+              classLevel={progress?.student.classLevel ?? undefined}
+            />
+          )}
+          {tab === "planner" && (
+            <PlannerView
+              classLevel={progress?.student.classLevel ?? undefined}
+            />
+          )}
+          {tab === "worksheet" && <WorksheetView progress={progress} />}
+          {tab === "teacher" && <TeacherView />}
+          {tab === "challenge" && (
+            <ChallengeView
+              classLevel={progress?.student.classLevel ?? undefined}
+            />
+          )}
         </main>
 
         <footer className="no-print mt-8 text-center text-xs text-white/30">

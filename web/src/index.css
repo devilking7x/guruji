@@ -63,6 +63,24 @@ body {
   color: #f1f5f9;
 }
 
+/* ---- Print-friendly worksheet (writing practice sheet) ---- */
+@media print {
+  .worksheet-sheet {
+    background: #ffffff !important;
+    color: #111111 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  .worksheet-sheet * {
+    color: #111111 !important;
+    background-color: transparent !important;
+    border-color: #9ca3af !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+}
+
 /* ---- Print-friendly parent report ---- */
 @media print {
   .no-print {

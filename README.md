@@ -25,8 +25,8 @@ Crores of Indian students study in Hindi or their mother tongue, but almost ever
 |---|---|
 | **Size of problem** | 25+ crore school students in India; majority learn in regional languages |
 | **Severity** | Weak foundations in 6–10 decide dropout vs. degree; vernacular gap is worst where help is needed most |
-| **Quality of solution** | Strict Socratic hint-ladder tutor + NCERT-grounded RAG with citations + FSRS revision + adaptive quiz/mastery/XP + parent report, premium violet-glass UI |
-| **Proven impact** | Deployed on free cloud; per-student memory + quiz history = real usage data from day one |
+| **Quality of solution** | Strict Socratic hint-ladder tutor + NCERT-grounded RAG (111 chapters) with citations + FSRS revision + adaptive quiz/mastery/XP + copy-check photo feedback + study planner + printable worksheets + teacher dashboard + leaderboard, premium violet-glass UI |
+| **Proven impact** | Deployed on free cloud; per-student memory + quiz history = real usage data from day one; teacher dashboard shows anonymous class-level aggregates |
 
 ---
 
@@ -34,7 +34,7 @@ Crores of Indian students study in Hindi or their mother tongue, but almost ever
 
 - 💬 **Chat tutor** — streaming answers (SSE), patient-teacher persona, Socratic follow-ups
 - 🪜 **Strict hint-ladder** — homework ke final answers KABHI nahi; mistake diagnose karke ek-ek guiding question, hints escalate hote hain (few-shot good/bad dialogues, cross-turn ladder memory)
-- 📚 **NCERT-grounded RAG-lite** — 14 original chapter summaries (Classes 6–10 Maths/Science) server-side retrieve hote hain; jawab me chapter citations; out-of-syllabus sawalon ko politely refuse
+- 📚 **NCERT-grounded RAG-lite** — **111 original chapter summaries** (Classes 6–10 Maths/Science — poora syllabus) server-side retrieve hote hain; jawab me chapter citations; out-of-syllabus sawalon ko politely refuse
 - 🎙 **Voice conversation loop** — mic (hi-IN) → jawab → Hindi TTS readout, speaker toggle; sab client-side, zero cost
 - 🧠 **Student memory** — naam, class, weak topics, quiz scores auto-saved (JSON store, 7-op interface)
 - 📝 **Adaptive quiz mode** — mastery se difficulty adapt (easy/medium/hard), instant grading + explanations; galat sawal auto-bante hain revision cards
@@ -42,10 +42,15 @@ Crores of Indian students study in Hindi or their mother tongue, but almost ever
 - ⭐ **Mastery / XP / streaks / badges** — per-topic mastery 0–100, XP + levels, din-ki-streak, unlockable badges, weak topics ke liye 20-min study plan
 - 📐 **Math + diagrams** — KaTeX equations aur Mermaid diagrams chat me render (lazy-loaded, strict sanitization)
 - 👪 **Parent report** — weekly mastery deltas, streaks, weak topics, study plan + print view (child-safety visibility)
+- 📸 **Copy check** — notebook ka photo lo (camera/file) → Guruji pehli galat step pehchanta hai aur ek guiding question poochhta hai (Socratic, full solution kabhi nahi); photo **process-and-discard** — kabhi save nahi hoti
+- 🗓 **Smart study planner** — chapters + bache hue din + roz ke minutes → day-wise checklist plan; due FSRS cards auto-include; check-off karke track karo
+- 🖨 **Printable worksheets** — kamzor topics ya chapter se practice sheets, writing space ke saath, ek click me print (teachers ke liye perfect)
+- 👩‍🏫 **Teacher dashboard** — class 6–10 ke **anonymous aggregates**: kitne students, topic-wise avg mastery, weakest topics, hafte ke quizzes, active streaks. 3 se kam students par "insufficient data" — naam/ID kabhi nahi
+- 🏆 **Leaderboard + daily challenge** — anonymous Hindi nicknames (ek baar change), roz ek class-appropriate sawal, XP bonus; weekly top-10 sirf nicknames ke saath
 - 🛡 **Child-safety guardrails** — prompt-injection filter (EN + Roman Hindi + Devanagari jailbreak patterns), self-harm safe-completion, AI-identity disclosure, no romantic/emotional framing, PII minimization
 - 🛡 **Demo armor** — per-IP daily token budget, friendly Hindi over-quota message (no surprise bills)
 
-> 🔒 **Privacy:** Guruji sirf nickname + class store karta hai — kabhi phone number, address, school ka naam ya photo nahi maangta. Saara student data per-student JSON me rehta hai; koi tracker/analytics nahi.
+> 🔒 **Privacy:** Guruji sirf nickname + class store karta hai — kabhi phone number, address, school ka naam nahi maangta. Copy-check photos **process-and-discard** hoti hain (disk par save nahi, logs me nahi). Teacher dashboard sirf anonymous aggregates dikhata hai (k-anonymity: 3+ students), leaderboard me sirf nicknames. Saara student data per-student JSON me rehta hai; koi tracker/analytics nahi.
 
 ## Quick start (local)
 
@@ -78,9 +83,16 @@ server/ (Express+TS, Render free tier, Singapore)
   ├── quiz.ts       — adaptive MCQ generation (mastery-based difficulty) + grading + XP/streak/mastery
   ├── srs.ts        — FSRS-lite spaced-repetition scheduler (deterministic, no LLM cost)
   ├── mastery.ts    — per-topic mastery 0–100, XP, IST streaks, badges
-  ├── chapters.ts   — RAG-lite retrieval over data/chapters/ (14 original summaries, TF-IDF)
+  ├── chapters.ts   — RAG-lite retrieval over data/chapters/ (111 original summaries, TF-IDF, ~40ms)
+  ├── copycheck.ts  — Socratic vision feedback (process-and-discard, magic-byte validated)
+  ├── planner.ts    — deterministic day-wise study plans (data/plans-<sid>.json, FSRS-aware)
+  ├── teacher.ts    — anonymous class aggregates (k-anonymity ≥ 3 students)
+  ├── challenge.ts  — deterministic daily MCQ per class (cached, once/day)
+  ├── leaderboard.ts— weekly XP top-10, nicknames only
+  ├── nickname.ts   — auto Hindi nicknames, one-time change
+  ├── multipart.ts  — dependency-free multipart parser (magic-byte image detection)
   ├── memory.ts     — per-student JSON store, atomic writes, keyword search
-  └── budget.ts     — per-IP daily spend cap (atomic ip-spend.json, IST rollover)
+  └── budget.ts     — per-IP daily spend cap (atomic ip-spend.json, IST rollover; vision/planner/worksheet spend attributed)
 ```
 
 No secrets in the repo — `LLM_API_KEY` is set in the Render dashboard only. Memory JSONs live in `data/` (gitignored; ephemeral on Render free tier — fine for the demo).
@@ -94,7 +106,10 @@ No secrets in the repo — `LLM_API_KEY` is set in the Render dashboard only. Me
 
 ## Roadmap
 
-- [ ] Devanagari handwriting/photo questions (vision model)
+- [x] Copy check — notebook photo se Socratic feedback (vision model)
+- [x] Full NCERT coverage — 111 chapters (Classes 6–10 Maths/Science)
+- [x] Smart study planner + printable worksheets
+- [x] Teacher dashboard (anonymous aggregates) + leaderboard/daily challenge
 - [x] Parent report view (weekly mastery deltas + print)
 - [ ] Offline question bank for low-connectivity areas
 - [ ] More subjects (SST, English grammar)

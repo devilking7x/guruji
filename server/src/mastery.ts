@@ -96,6 +96,41 @@ export function difficultyFor(studentId: string, topic: string): Difficulty {
   return "medium";
 }
 
+/** Touch the daily-activity streak (IST calendar days). Shared by quizzes and challenges. */
+function touchStreak(state: MasteryState): void {
+  const today = istDayKey();
+  const yesterday = istDayKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  if (state.lastQuizDay === today) {
+    // same day: streak unchanged
+  } else if (state.lastQuizDay === yesterday) {
+    state.streak += 1;
+  } else {
+    state.streak = 1;
+  }
+  // NOTE: lastQuizDay doubles as "last activity day" (quiz OR challenge)
+  // so the streak survives mixed activity. Existing files keep working.
+  state.lastQuizDay = today;
+}
+
+/**
+ * Award XP for the daily challenge WITHOUT touching quiz stats:
+ * +15 for a correct answer, +5 for an attempt. Streak still advances —
+ * any daily learning activity keeps the streak alive.
+ */
+export function awardChallengeXp(
+  studentId: string,
+  correct: boolean
+): { xpGained: number; xp: number; streak: number } {
+  const sid = sanitizeStudentId(studentId);
+  if (!sid) throw new Error("Valid studentId chahiye.");
+  const state = readState(sid);
+  touchStreak(state);
+  const xpGained = correct ? 15 : 5;
+  state.xp += xpGained;
+  writeState(sid, state);
+  return { xpGained, xp: state.xp, streak: state.streak };
+}
+
 export interface RecordQuizResult {
   xpGained: number;
   xp: number;
@@ -132,17 +167,8 @@ export function recordQuiz(
   }
   state.topics[key] = mastery;
 
-  // Streak over IST calendar days.
-  const today = istDayKey();
-  const yesterday = istDayKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
-  if (state.lastQuizDay === today) {
-    // same day: streak unchanged
-  } else if (state.lastQuizDay === yesterday) {
-    state.streak += 1;
-  } else {
-    state.streak = 1;
-  }
-  state.lastQuizDay = today;
+  // Streak over IST calendar days (shared helper — challenge answers also count).
+  touchStreak(state);
   state.quizCount += 1;
 
   const xpGained = 10 * correct + (state.streak >= 2 ? 5 * state.streak : 0);
@@ -186,6 +212,7 @@ export interface ProgressExtras {
   streak: number;
   badges: string[];
   weakTopics: string[];
+  quizCount: number;
 }
 
 /** Everything GET /api/progress adds on top of the v1 fields. */
@@ -198,5 +225,6 @@ export function progressExtras(studentId: string): ProgressExtras {
     streak: state.streak,
     badges: badgesFor(state),
     weakTopics: weakTopicsFor(state),
+    quizCount: state.quizCount,
   };
 }
