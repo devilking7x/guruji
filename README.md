@@ -1,0 +1,3 @@
+# Guruji
+
+Seeding initial commit.
