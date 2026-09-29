@@ -11,6 +11,7 @@ import {
   togglePlannerTask,
   type StudyPlan,
 } from "../api";
+import { useLang } from "../i18n";
 
 function Err({ msg }: { msg: string }) {
   if (!msg) return null;
@@ -26,6 +27,7 @@ export default function PlannerView({
 }: {
   classLevel?: string | number;
 }) {
+  const { t } = useLang();
   const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -131,7 +133,7 @@ export default function PlannerView({
   };
 
   if (loading) {
-    return <p className="text-white/50 text-sm">Plan load ho raha hai…</p>;
+    return <p className="text-white/50 text-sm">{t.common.loading}</p>;
   }
 
   // ---- existing plan: day-wise checklist
@@ -146,17 +148,17 @@ export default function PlannerView({
         <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-lg font-bold text-slate-100 tracking-tight">
-              🗓 Tumhara study plan
+              {t.planner.planTitle}
             </h2>
             <button
               onClick={discard}
               className="text-xs text-white/50 hover:text-red-300 underline"
             >
-              Naya plan banao
+              {t.planner.newPlan}
             </button>
           </div>
           <p className="text-sm text-white/60">
-            {done}/{total} tasks complete
+            {done}/{total} {t.planner.tasksComplete}
           </p>
           <div className="h-2 mt-2 rounded-full bg-white/10 overflow-hidden">
             <div
@@ -215,14 +217,11 @@ export default function PlannerView({
       <Err msg={err} />
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
         <h2 className="text-lg font-bold text-slate-100 tracking-tight mb-1">
-          🗓 Study plan banao
+          {t.planner.buildTitle}
         </h2>
-        <p className="text-sm text-white/60 mb-4">
-          Chapters chuno, din aur roz ka time likho — Guruji day-wise checklist
-          bana dega.
-        </p>
+        <p className="text-sm text-white/60 mb-4">{t.planner.buildDesc}</p>
 
-        <p className="text-xs text-white/50 mb-2">Class</p>
+        <p className="text-xs text-white/50 mb-2">{t.planner.classLabel}</p>
         <select
           value={cls}
           onChange={(e) => {
@@ -268,7 +267,7 @@ export default function PlannerView({
 
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <label className="flex-1">
-            <span className="text-xs text-white/50">Kitne din?</span>
+            <span className="text-xs text-white/50">{t.planner.daysLabel}</span>
             <input
               type="number"
               min={1}
@@ -279,7 +278,7 @@ export default function PlannerView({
             />
           </label>
           <label className="flex-1">
-            <span className="text-xs text-white/50">Roz kitne minutes?</span>
+            <span className="text-xs text-white/50">{t.planner.minutesLabel}</span>
             <input
               type="number"
               min={10}
@@ -297,16 +296,14 @@ export default function PlannerView({
           disabled={building}
           className="w-full rounded-xl bg-gradient-to-r from-accent to-accentdeep text-white font-bold py-3 hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
-          {building ? "Plan ban raha…" : "📅 Mera plan banao"}
+          {building ? t.planner.building : t.planner.build}
         </button>
       </div>
 
       <div className="rounded-2xl bg-white/5 border border-white/10 p-6 text-center">
         <p className="text-3xl mb-2">🗓</p>
-        <p className="text-white/80 font-semibold">Abhi koi plan nahi hai</p>
-        <p className="text-sm text-white/50 mt-1">
-          Upar form se apna plan banao — roz ki checklist yahan dikhegi.
-        </p>
+        <p className="text-white/80 font-semibold">{t.planner.noPlanTitle}</p>
+        <p className="text-sm text-white/50 mt-1">{t.planner.noPlanDesc}</p>
       </div>
     </div>
   );

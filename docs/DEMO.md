@@ -44,3 +44,33 @@
 ---
 
 **Recording tips:** 1080p, har click se pehle 1-sec pause, narration visuals se aage na bhaage. Backend live ho to real LLM jawab dikhao, warna mock mode me UI flow.
+
+---
+
+## ✨ Round 4 segment (~30 second) — shot-by-shot
+
+> Landing page → PWA install → Marathi toggle → Notebook bookmark → WhatsApp share → Prabhav counters → poster. Roman Hindi narration.
+
+**Shot A — Landing page (0:00–0:06)**
+**Screen:** Guruji landing page (violet theme, hero + "Shuru karo" button).
+**Bolo:** "Ab Guruji ka naya look — ek simple landing page, jo seedha samjhata hai: Hindi me padho, Socratic seekho, bilkul free."
+
+**Shot B — PWA install (0:06–0:11)**
+**Screen:** Browser menu → "Install app" → Guruji home screen par icon.
+**Bolo:** "Install bhi ek click me — Guruji ab phone par ek **app ki tarah** chalta hai, bina Play Store ke."
+
+**Shot C — Marathi toggle (0:11–0:16)**
+**Screen:** Language toggle → Marathi select → chat me Marathi jawab.
+**Bolo:** "Aur ab sirf Hindi nahi — **Marathi** me bhi. Apni bhasha chuno, Guruji usi me padhayega."
+
+**Shot D — Notebook bookmark (0:16–0:21)**
+**Screen:** Chat me ek achha jawab → "Notebook me save" → Meri Notebook tab me saved card.
+**Bolo:** "Achha jawab mila? **Meri Notebook** me save karo — revision ke time sab ek jagah milega."
+
+**Shot E — WhatsApp share + Prabhav counters (0:21–0:27)**
+**Screen:** Share button → WhatsApp par link jaata hai; phir landing page par Prabhav (impact) counters: students, quizzes, streaks.
+**Bolo:** "Dost ko **WhatsApp par share** karo — aur dekho kitne students seekh rahe hain, public **Prabhav counters** par."
+
+**Shot F — Poster (0:27–0:30)**
+**Screen:** `/poster` page → print preview → classroom poster.
+**Bolo:** "Teachers ke liye **school pilot kit aur printable poster** — docs me ready. 🙏"

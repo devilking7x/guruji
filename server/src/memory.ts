@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { atomicWriteJson } from "./fsutil";
 
-export type MemoryKind = "profile" | "fact" | "quiz_result" | "weak_topic" | "hint_ladder" | "nickname";
+export type MemoryKind = "profile" | "fact" | "quiz_result" | "weak_topic" | "hint_ladder" | "nickname" | "language";
+
+/** Supported tutor languages. Stored per student as a superseded "language" record. */
+export type StudentLang = "hi" | "mr";
 
 export interface MemoryRecord {
   id: string;
@@ -170,9 +173,29 @@ export function markSupersededIfExists(
   if (changed) writeAll(sid, records);
 }
 
-/** Danger utility (tests/admin): wipe a student's file. */
-export function clearStudent(studentId: string): void {
+/**
+ * Student's preferred tutor language ("hi" default, "mr" Marathi).
+ * Stored as a "language" memory record; setting supersedes the old one.
+ */
+export function getLanguage(studentId: string): StudentLang {
   const sid = sanitizeStudentId(studentId);
+  const recs = readAll(sid)
+    .filter((r) => r.kind === "language" && !r.superseded)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return recs.length > 0 && recs[0].text.trim().toLowerCase() === "mr" ? "mr" : "hi";
+}
+
+export function setLanguage(studentId: string, lang: StudentLang): void {
+  const sid = sanitizeStudentId(studentId);
+  if (!sid) throw new Error("Valid studentId chahiye.");
+  if (lang !== "hi" && lang !== "mr") throw new Error("Language sirf 'hi' ya 'mr' ho sakti hai.");
+  // Supersede all old language records (empty textIncludes matches the kind).
+  markSupersededIfExists(sid, "language", "");
+  add(sid, lang, "language");
+}
+
+/** Danger utility (tests/admin): wipe a student's file. */
+export function clearStudent(studentId: string): void {  const sid = sanitizeStudentId(studentId);
   const f = fileFor(sid);
   if (existsSync(f)) rmSync(f);
 }

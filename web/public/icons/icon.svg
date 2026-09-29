@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#0A0A12"/>
+  <!-- graduation cap: indigo depth + violet board -->
+  <polygon points="76,244 256,320 436,244 436,268 256,344 76,268" fill="#6366F1"/>
+  <polygon points="256,168 436,244 256,320 76,244" fill="#8B5CF6"/>
+  <!-- head base -->
+  <rect x="186" y="290" width="140" height="82" rx="34" fill="#6D28D9"/>
+  <!-- tassel -->
+  <line x1="436" y1="244" x2="436" y2="360" stroke="#A78BFA" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="436" cy="384" r="24" fill="#A78BFA"/>
+</svg>

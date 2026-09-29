@@ -4,8 +4,9 @@
     <meta charset="utf-8" />
     <title>Guruji</title>
     <script>
-      // GitHub Pages SPA fallback: the app has no router, so any deep
-      // path simply bounces back to the app root.
+      // GitHub Pages SPA fallback: the app uses hash routing (#/, #/app,
+      // #/poster), so any deep path simply bounces back to the app root —
+      // the hash route takes over from there.
       (function () {
         location.replace("/guruji/");
       })();

@@ -51,14 +51,21 @@ if (typeof window !== "undefined" && "speechSynthesis" in window) {
   }
 }
 
-/** Prefer an hi-IN voice, fall back to any Hindi voice, else null. */
-export function pickHindiVoice(): SpeechSynthesisVoice | null {
+/** Prefer a `<locale>` voice (hi-IN / mr-IN), fall back to any same-language voice, else null. */
+export function pickVoice(locale: "hi-IN" | "mr-IN"): SpeechSynthesisVoice | null {
   const vs = allVoices();
+  const want = locale.toLowerCase();
+  const prefix = want.slice(0, 2);
   return (
-    vs.find((v) => !!v.lang && v.lang.toLowerCase() === "hi-in") ??
-    vs.find((v) => !!v.lang && v.lang.toLowerCase().startsWith("hi")) ??
+    vs.find((v) => !!v.lang && v.lang.toLowerCase() === want) ??
+    vs.find((v) => !!v.lang && v.lang.toLowerCase().startsWith(prefix)) ??
     null
   );
+}
+
+/** Back-compat: prefer an hi-IN voice. */
+export function pickHindiVoice(): SpeechSynthesisVoice | null {
+  return pickVoice("hi-IN");
 }
 
 /**
@@ -78,21 +85,31 @@ export function cleanForSpeech(text: string): string {
     .slice(0, 1200);
 }
 
-export function speakHindi(text: string): void {
+/**
+ * Speak text aloud in the given language (hi -> hi-IN, mr -> mr-IN).
+ * Everything is client-side and free. All failures degrade to text chat.
+ */
+export function speak(text: string, lang: "hi" | "mr" = "hi"): void {
   if (!supportsTTS()) return;
   const clean = cleanForSpeech(text);
   if (!clean) return;
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(clean);
-    u.lang = "hi-IN";
-    const v = pickHindiVoice();
+    const locale = lang === "mr" ? "mr-IN" : "hi-IN";
+    u.lang = locale;
+    const v = pickVoice(locale);
     if (v) u.voice = v;
     u.rate = 0.95;
     window.speechSynthesis.speak(u);
   } catch {
     /* TTS failed — chat still works, stay silent */
   }
+}
+
+/** Back-compat wrapper (Hindi). Prefer `speak(text, lang)`. */
+export function speakHindi(text: string): void {
+  speak(text, "hi");
 }
 
 export function stopSpeaking(): void {

@@ -63,6 +63,34 @@ body {
   color: #f1f5f9;
 }
 
+/* ---- Print-friendly classroom poster (ink-friendly) ---- */
+@media print {
+  .poster-sheet {
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+  .poster-sheet [class*="text-white"] {
+    color: #1e1b2e !important;
+  }
+  .poster-sheet [class*="bg-white/5"] {
+    background: #f5f3ff !important;
+  }
+  .poster-sheet [class*="text-accentlight"] {
+    color: #6d28d9 !important;
+  }
+  .poster-sheet .bg-clip-text {
+    background-image: none !important;
+    color: #1e1b2e !important;
+    -webkit-text-fill-color: #1e1b2e !important;
+  }
+  .poster-sheet [class*="border-accent"] {
+    border-color: #c4b5fd !important;
+  }
+  .poster-sheet [class*="bg-accent/10"] {
+    background: #f5f3ff !important;
+  }
+}
+
 /* ---- Print-friendly worksheet (writing practice sheet) ---- */
 @media print {
   .worksheet-sheet {

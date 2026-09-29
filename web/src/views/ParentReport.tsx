@@ -5,6 +5,7 @@
  */
 import { useMemo } from "react";
 import type { ProgressData } from "../api";
+import { useLang } from "../i18n";
 
 interface QItem {
   date: string;
@@ -56,6 +57,7 @@ export default function ParentReport({
   onRefresh: () => void;
   onQuizTopic: (topic: string) => void;
 }) {
+  const { t } = useLang();
   const calc = useMemo(() => {
     if (!progress) return null;
     const items = toItems(progress).filter(
@@ -83,22 +85,22 @@ export default function ParentReport({
   }, [progress]);
 
   if (loading) {
-    return <p className="text-white/50 text-sm">Report ban rahi hai…</p>;
+    return <p className="text-white/50 text-sm">{t.parent.loading}</p>;
   }
 
   if (!progress || !calc || calc.items.length === 0) {
     return (
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-8 text-center">
         <p className="text-3xl mb-2">👨‍👩‍👧</p>
-        <p className="text-white/80 font-semibold">Abhi report banane ke liye data nahi hai</p>
+        <p className="text-white/80 font-semibold">{t.parent.noDataTitle}</p>
         <p className="text-sm text-white/50 mt-1 mb-4">
-          Baccha jab quiz dega, tab yahan hafte-dar-hafte progress dikhegi.
+          {t.parent.noDataDesc}
         </p>
         <button
           onClick={onRefresh}
           className="rounded-xl bg-gradient-to-r from-accent to-accentdeep text-white font-bold px-6 py-2 hover:opacity-90 transition-opacity"
         >
-          🔄 Refresh
+          {t.parent.refresh}
         </button>
       </div>
     );
@@ -116,9 +118,9 @@ export default function ParentReport({
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold text-slate-100 tracking-tight">👨‍👩‍👧 Mata-Pita Report</h2>
+            <h2 className="text-xl font-bold text-slate-100 tracking-tight">{t.parent.title}</h2>
             <p className="text-sm text-white/60 mt-0.5">
-              {name} ki padhai — ek nazar me
+              {name} {t.parent.subtitle}
             </p>
           </div>
           <div className="flex gap-2 no-print shrink-0">
@@ -126,7 +128,7 @@ export default function ParentReport({
               onClick={() => window.print()}
               className="text-xs font-semibold text-accentlight border border-accent/40 rounded-full px-3 py-1.5 hover:border-accent"
             >
-              🖨 Print
+              {t.parent.print}
             </button>
             <button
               onClick={onRefresh}
@@ -160,7 +162,7 @@ export default function ParentReport({
 
       {/* mastery deltas */}
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5 overflow-x-auto">
-        <h3 className="font-bold text-slate-100 tracking-tight mb-3">📈 Hafte-dar-hafte badlav</h3>
+        <h3 className="font-bold text-slate-100 tracking-tight mb-3">{t.parent.weekTitle}</h3>
         {calc.rows.length === 0 ? (
           <p className="text-sm text-white/50">
             Pichhle 14 din me koi quiz nahi hua — tulna ke liye data nahi hai.
@@ -207,7 +209,7 @@ export default function ParentReport({
 
       {/* weak topics + weekly plan */}
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
-        <h3 className="font-bold text-slate-100 tracking-tight mb-3">🎯 Is hafte ka plan</h3>
+        <h3 className="font-bold text-slate-100 tracking-tight mb-3">{t.parent.planTitle}</h3>
         {weak.length === 0 ? (
           <p className="text-sm text-white/70">
             ✅ Abhi koi kamzor topic nahi dikh raha — badhiya chal raha hai! Naye
@@ -215,21 +217,21 @@ export default function ParentReport({
           </p>
         ) : (
           <div className="space-y-2.5">
-            {weak.slice(0, 4).map((t, i) => (
+            {weak.slice(0, 4).map((wt, i) => (
               <div
-                key={t}
+                key={wt}
                 className="flex items-center justify-between gap-2 rounded-xl bg-ink/60 border border-white/10 px-4 py-2.5"
               >
                 <p className="text-sm text-white/85">
                   <span className="font-semibold text-accentlight">{PLAN_DAYS[i] ?? "Ravivaar"}:</span>{" "}
-                  📉 {t}
+                  📉 {wt}
                   <span className="text-white/40"> — 5 min cards → 10 min quiz → 5 min dobara</span>
                 </p>
                 <button
-                  onClick={() => onQuizTopic(t)}
+                  onClick={() => onQuizTopic(wt)}
                   className="no-print shrink-0 text-xs font-bold bg-gradient-to-r from-accent to-accentdeep text-white rounded-full px-3 py-1 hover:opacity-90"
                 >
-                  Quiz 📝
+                  {t.parent.quizFor}
                 </button>
               </div>
             ))}
@@ -243,7 +245,7 @@ export default function ParentReport({
 
       {/* safety note */}
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
-        <h3 className="font-bold text-slate-100 tracking-tight mb-2">🔒 Suraksha note</h3>
+        <h3 className="font-bold text-slate-100 tracking-tight mb-2">{t.parent.safetyTitle}</h3>
         <p className="text-sm text-white/70 leading-relaxed">
           Guruji kabhi naam, pata ya phone number nahi maangta. Har student ka
           saara data alag JSON file me server par surakshit rehta hai — kisi

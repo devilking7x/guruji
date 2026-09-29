@@ -102,7 +102,10 @@ export function isOutOfSyllabus(message: string): boolean {
   return false;
 }
 
-export function outOfSyllabusReply(devanagari: boolean): string {
+export function outOfSyllabusReply(devanagari: boolean, lang?: memory.StudentLang): string {
+  if (lang === "mr") {
+    return "हा प्रश्न आपल्या अभ्यासक्रमाबाहेर (Class 6-10 Maths/Science) आहे 🙂. पण मी Maths किंवा Science मध्ये तुमची पूर्ण मदत करू शकतो — जसे अपूर्णांक, प्रकाशसंश्लेषण, किंवा प्रकाश. काय शिकायचं?";
+  }
   return devanagari
     ? "यह सवाल हमारे सिलेबस (Class 6-10 Maths/Science) के बाहर है 🙂। लेकिन मैं तुम्हारी Maths या Science में पूरी मदद कर सकता हूँ — जैसे भिन्न, प्रकाश संश्लेषण, या प्रकाश। क्या पढ़ना चाहोगे?"
     : "Ye sawal humare syllabus (Class 6-10 Maths/Science) ke bahar hai 🙂. Lekin main tumhari Maths ya Science me poori madad kar sakta hoon — jaise fractions, photosynthesis, ya light. Kya padhna chahte ho?";
@@ -159,7 +162,8 @@ function buildSystemPrompt(
   mode: "chat" | "revision",
   chapters: ChapterHit[],
   ladder: LadderInfo,
-  offSyllabus: boolean
+  offSyllabus: boolean,
+  lang: memory.StudentLang
 ): string {
   const memBlock =
     memoryHits.length > 0
@@ -190,8 +194,21 @@ function buildSystemPrompt(
       "Najdeeki topic ke liye upar diye gaye chapters me se chuno."
     : "";
 
+  // Language preference: Marathi tutors keep ALL Socratic rules + guardrails
+  // identical — only the reply language changes (TTS/voice locale is the
+  // frontend's job).
+  const langBlock =
+    lang === "mr"
+      ? "BHASHA: student ne MARATHI chuni hai — jawab hamesha SIMPLE MARATHI (मराठी, Devanagari script) me do. " +
+        "Technical English shabd (jaise photosynthesis, fraction, gravity) English me hi rakho. " +
+        "Socratic hint-ladder ke niyam, guardrails, aur identity rules upar wale bilkul waise hi rahenge — koi badlav nahi."
+      : "";
+
   return [
-    "Tum Guruji ho — Classes 6-10 ke Maths aur Science ke patient, encouraging Hindi tutor.",
+    lang === "mr"
+      ? "Tum Guruji ho — Classes 6-10 ke Maths aur Science ke patient, encouraging Marathi (मराठी) tutor."
+      : "Tum Guruji ho — Classes 6-10 ke Maths aur Science ke patient, encouraging Hindi tutor.",
+    langBlock,
     modeBlock,
     "",
     "PEHCHAAN AUR SEEMA (har turn me yaad rakho):",
@@ -222,7 +239,9 @@ function buildSystemPrompt(
     'SAHI Guruji: "Bahut badhiya sawal! 🌱 Tumne kabhi socha hai, paudhe apna khana kahan se laate hain? Pehle ye batao — paudhe ko zinda rehne ke liye kin cheezon ki zaroorat hoti hai?"',
     "",
     "Rules:",
-    "- SIMPLE Hindi me jawab do. Student Roman Hindi me likhe to tum bhi Roman Hindi me likho; Devanagari me likhe to Devanagari me likho.",
+    lang === "mr"
+      ? "- SIMPLE Marathi (मराठी, Devanagari script) me jawab do. Student Roman Marathi me likhe to bhi jawab Devanagari Marathi me hi do."
+      : "- SIMPLE Hindi me jawab do. Student Roman Hindi me likhe to tum bhi Roman Hindi me likho; Devanagari me likhe to Devanagari me likho.",
     "- Technical English shabd (jaise photosynthesis, fraction, gravity) English me hi rakho.",
     "- Rozmarra ki life se examples do. Jawaab short aur clear rakho.",
     "- Agar student quiz maange to batao ki quiz mode me jaakar quiz shuru kar sakta hai.",
@@ -259,7 +278,7 @@ export async function runChat(opts: RunChatOpts): Promise<RunChatResult> {
 
   // Out-of-syllabus: deterministic polite refusal, no LLM spend.
   if (isOutOfSyllabus(message)) {
-    const reply = outOfSyllabusReply(inDevanagari);
+    const reply = outOfSyllabusReply(inDevanagari, memory.getLanguage(studentId));
     opts.onToken(reply);
     const inTok = estimateTokens(message) + 500;
     const outTok = estimateTokens(reply);
@@ -271,10 +290,14 @@ export async function runChat(opts: RunChatOpts): Promise<RunChatResult> {
   const hits = memory.search(studentId, message);
   const chapters = searchChapters(message, 2);
   const ladder = ladderLevelFor(studentId, message);
-  const system = buildSystemPrompt(profile, hits, opts.mode, chapters, ladder, false);
-  const scriptNote = inDevanagari
-    ? "Student Devanagari me likh raha hai — tum bhi Devanagari me jawab do."
-    : "Student Roman Hindi me likh raha hai — tum bhi Roman Hindi me jawab do.";
+  const lang = memory.getLanguage(studentId);
+  const system = buildSystemPrompt(profile, hits, opts.mode, chapters, ladder, false, lang);
+  const scriptNote =
+    lang === "mr"
+      ? "Student Marathi prefer karta hai — tum bhi Marathi (Devanagari) me jawab do."
+      : inDevanagari
+      ? "Student Devanagari me likh raha hai — tum bhi Devanagari me jawab do."
+      : "Student Roman Hindi me likh raha hai — tum bhi Roman Hindi me jawab do.";
 
   const messages: ChatMessage[] = [
     { role: "system", content: system + "\n" + scriptNote },

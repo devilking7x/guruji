@@ -52,6 +52,18 @@ Crores of Indian students study in Hindi or their mother tongue, but almost ever
 
 > 🔒 **Privacy:** Guruji sirf nickname + class store karta hai — kabhi phone number, address, school ka naam nahi maangta. Copy-check photos **process-and-discard** hoti hain (disk par save nahi, logs me nahi). Teacher dashboard sirf anonymous aggregates dikhata hai (k-anonymity: 3+ students), leaderboard me sirf nicknames. Saara student data per-student JSON me rehta hai; koi tracker/analytics nahi.
 
+## ✨ Round 4 — Outreach & polish (build in progress)
+
+> ⚠️ Backend abhi live deploy ke liye ready hai, par deployed **nahi** hai — live connect pending (user action). Neeche ke features frontend me build ho rahe hain; backend live hote hi sab kaam karenge.
+
+- 🏠 **Landing page** — violet theme me ek simple public home page: kya hai Guruji, kaise kaam karta hai, "Shuru karo" button
+- 📲 **PWA installable** — browser se ek click me phone par app ki tarah install; offline shell bhi
+- 🌐 **Marathi support** — Hindi ke saath Marathi language toggle; UI + tutor dono Marathi me
+- 📓 **Meri Notebook** — achhe jawab/quiz explanations ek tap me save; revision ke liye personal notebook tab
+- 💬 **WhatsApp share** — doston ko Guruji ka link WhatsApp par share, ek click me
+- 📊 **Public impact counters** — landing page par live Prabhav counters: students, quizzes, streaks (koi personal data nahi)
+- 🏫 **School pilot kit + poster page** — teachers ke liye 1-page classroom pilot kit ([docs/PILOT-KIT.md](docs/PILOT-KIT.md)) aur `/poster` page: QR wala printable A4 poster
+
 ## Quick start (local)
 
 ```bash

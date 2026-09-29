@@ -7,9 +7,12 @@ import * as mastery from "./mastery";
 import { searchChapters, loadChapters } from "./chapters";
 import { runChat, BudgetError, BUDGET_HINDI_MSG } from "./agent";
 import { startQuiz, submitQuiz, generateQuestionItems, QuizNotFoundError } from "./quiz";
-import { checkBudget, recordSpend, istDayKey } from "./budget";
+import { checkBudget, recordSpend, trySpend, istDayKey } from "./budget";
 import { estimateTokens } from "./llm";
 import { checkSelfHarm, checkJailbreak } from "./guard";
+// Round 4 modules.
+import * as notebook from "./notebook";
+import { impactStats } from "./impact";
 // Round 3 modules.
 import { checkCopy } from "./copycheck";
 import * as planner from "./planner";
@@ -109,7 +112,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
 
 // ---------- student ----------
 app.post("/api/student", (req: Request, res: Response) => {
-  const { studentId, name, classLevel } = req.body ?? {};
+  const { studentId, name, classLevel, lang } = req.body ?? {};
   if (typeof name !== "string" || name.trim().length < 1 || name.trim().length > 100) {
     res.status(400).json({ error: "badRequest", message: "Naam 1-100 characters ka hona chahiye." });
     return;
@@ -127,11 +130,21 @@ app.post("/api/student", (req: Request, res: Response) => {
     res.status(400).json({ error: "badRequest", message: "Valid studentId nahi ban paya." });
     return;
   }
+  // Optional initial language (Round 4): strict "hi" | "mr".
+  let initialLang: memory.StudentLang = "hi";
+  if (lang !== undefined) {
+    if (lang !== "hi" && lang !== "mr") {
+      res.status(400).json({ error: "badRequest", message: "lang sirf 'hi' ya 'mr' ho sakta hai." });
+      return;
+    }
+    initialLang = lang;
+  }
   // Upsert profile memory: supersede old profile, add new one.
   for (const rec of memory.list(sid)) {
     if (rec.kind === "profile") memory.markSupersededIfExists(sid, "profile", rec.text.slice(0, 20));
   }
   memory.add(sid, `Naam: ${name.trim()}, Class: ${cls}`, "profile");
+  memory.setLanguage(sid, initialLang);
   // Round 3: every student gets an auto-generated anonymous nickname.
   let nick = "";
   try {
@@ -141,8 +154,68 @@ app.post("/api/student", (req: Request, res: Response) => {
   }
   res.status(200).json({
     ok: true,
-    student: { studentId: sid, name: name.trim(), classLevel: cls, nickname: nick },
+    student: { studentId: sid, name: name.trim(), classLevel: cls, nickname: nick, lang: initialLang },
   });
+});
+
+// ---------- student profile (Round 4) ----------
+// GET /api/student/:id — lang field included (default "hi") for the frontend
+// to know which language the tutor replies in.
+app.get("/api/student/:id", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.params.id);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const records = memory.list(sid);
+  const profile = records.find((r) => r.kind === "profile" && !r.superseded);
+  if (!profile) {
+    res.status(404).json({ error: "notFound", message: "Student nahi mila." });
+    return;
+  }
+  let name: string | null = null;
+  let classLevel: string | null = null;
+  const nm = /Naam:\s*([^,]+)/.exec(profile.text);
+  const cl = /Class:\s*([^\s,]+)/.exec(profile.text);
+  if (nm) name = nm[1].trim();
+  if (cl) classLevel = cl[1].trim();
+  let nick: string | null = null;
+  try {
+    nick = nickname.getNickname(sid).nickname;
+  } catch {
+    // nickname must never fail profile reads
+  }
+  res.status(200).json({
+    ok: true,
+    student: {
+      studentId: sid,
+      name,
+      classLevel,
+      nickname: nick,
+      lang: memory.getLanguage(sid),
+    },
+  });
+});
+
+// ---------- student language preference (Round 4: hi | mr) ----------
+app.post("/api/student/language", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.body?.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const lang = req.body?.lang;
+  if (lang !== "hi" && lang !== "mr") {
+    badRequest(res, "lang sirf 'hi' ya 'mr' ho sakta hai.");
+    return;
+  }
+  try {
+    memory.setLanguage(sid, lang);
+  } catch (err) {
+    badRequest(res, err instanceof Error ? err.message : "Language set nahi ho payi.");
+    return;
+  }
+  res.status(200).json({ ok: true, studentId: sid, lang });
 });
 
 // ---------- chat (SSE) ----------
@@ -545,6 +618,12 @@ app.get("/api/teacher/stats", (req: Request, res: Response) => {
   res.status(200).json(teacherStats(cls));
 });
 
+// ---------- impact (Round 4: anonymous public aggregates) ----------
+// 5-minute in-memory cache; refuses with insufficient when <5 learners.
+app.get("/api/impact", (_req: Request, res: Response) => {
+  res.status(200).json(impactStats());
+});
+
 // ---------- nicknames (Round 3: anonymous identity) ----------
 app.get("/api/nickname", (req: Request, res: Response) => {
   const sid = requireStudentId(req.query.studentId);
@@ -673,6 +752,101 @@ app.get("/api/leaderboard", (req: Request, res: Response) => {
     week: leaderboard.isoWeekLabel(),
     entries: leaderboard.topForClass(cls, 10),
   });
+});
+
+// ---------- notebook (Round 4: per-student saved notes) ----------
+// Isolation: every route validates the studentId through sanitizeStudentId
+// and note ids against ^[a-z0-9-]{1,64}$ — a student can only ever read,
+// write or delete their own notebook file. Free-form text goes through the
+// guard.ts sanitizers (prompt-injection + self-harm), and writes are
+// budget-accounted per IP (abuse guard), same pattern as chat guards.
+app.post("/api/notebook", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.body?.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const text = String(req.body?.text ?? "").trim();
+  if (text.length < 1 || text.length > 2000) {
+    badRequest(res, "Note ka text 1-2000 characters ka hona chahiye.");
+    return;
+  }
+  const title =
+    req.body?.title === undefined || req.body?.title === null
+      ? undefined
+      : String(req.body.title).trim();
+  if (title !== undefined && (title.length < 1 || title.length > 120)) {
+    badRequest(res, "Title 1-120 characters ka hona chahiye.");
+    return;
+  }
+  const source =
+    req.body?.source === undefined || req.body?.source === null
+      ? undefined
+      : String(req.body.source).trim().slice(0, 50);
+  if (source !== undefined && source.length < 1) {
+    badRequest(res, "Source 1-50 characters ka hona chahiye.");
+    return;
+  }
+  // Guard: strip prompt-injection / crisis content before persisting.
+  const crisis = checkSelfHarm(text);
+  const jailbreak = crisis ? null : checkJailbreak(text);
+  const guardReply = crisis ?? jailbreak;
+  if (guardReply) {
+    res.status(400).json({ error: "badRequest", message: guardReply });
+    return;
+  }
+  // Budget accounting: tiny entry per note so save-spam can't be abused.
+  if (!trySpend(clientIp(req), estimateTokens(text) + 50, 0).ok) {
+    res.status(429).json({ error: "budgetExceeded", message: BUDGET_HINDI_MSG });
+    return;
+  }
+  try {
+    const note = notebook.addNote(sid, text, title, source);
+    res.status(200).json({ ok: true, id: note.id });
+  } catch (err) {
+    badRequest(res, err instanceof Error ? err.message : "Note save nahi ho paya.");
+  }
+});
+
+app.get("/api/notebook", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.query.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const q = typeof req.query.q === "string" ? req.query.q : "";
+  if (q.length > 100) {
+    badRequest(res, "Search query 100 characters se chhoti honi chahiye.");
+    return;
+  }
+  const notes = notebook.listNotes(sid, q).map((n) => ({
+    id: n.id,
+    text: n.text,
+    title: n.title,
+    source: n.source,
+    createdAt: n.createdAt,
+    updatedAt: n.updatedAt,
+  }));
+  res.status(200).json({ ok: true, notes });
+});
+
+app.delete("/api/notebook/:id", (req: Request, res: Response) => {
+  const sid = requireStudentId(req.query.studentId);
+  if (!sid) {
+    badRequest(res, "Valid studentId chahiye.");
+    return;
+  }
+  const id = String(req.params.id ?? "");
+  if (!notebook.isValidNoteId(id)) {
+    badRequest(res, "Note id ka format galat hai.");
+    return;
+  }
+  const ok = notebook.deleteNote(sid, id);
+  if (!ok) {
+    res.status(404).json({ error: "notFound", message: "Note nahi mila." });
+    return;
+  }
+  res.status(200).json({ ok: true });
 });
 
 // ---------- revision queue (FSRS-lite) ----------

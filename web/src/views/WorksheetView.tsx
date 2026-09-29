@@ -4,7 +4,8 @@
  * writing space + "🖨 Print karo" (print CSS .worksheet-sheet hides nav).
  */
 import { useEffect, useState } from "react";
-import { CHAPTERS, generateWorksheet, type ProgressData, type Worksheet } from "../api";
+import { CHAPTERS, generateWorksheet, waShareUrl, type ProgressData, type Worksheet } from "../api";
+import { useLang } from "../i18n";
 
 function Err({ msg }: { msg: string }) {
   if (!msg) return null;
@@ -22,6 +23,7 @@ export default function WorksheetView({
 }: {
   progress: ProgressData | null;
 }) {
+  const { t } = useLang();
   const [cls, setCls] = useState(
     String(progress?.student.classLevel ?? "8")
   );
@@ -44,11 +46,11 @@ export default function WorksheetView({
   const generate = async () => {
     const n = Number(count);
     if (mode === "chapter" && !chapterId) {
-      setErr("Pehle ek chapter choose karo 📚");
+      setErr(t.worksheet.errChapter);
       return;
     }
     if (mode === "weak" && weakTopics.length === 0) {
-      setErr("Abhi koi kamzor topic nahi mila — pehle quiz do 📝");
+      setErr(t.worksheet.errWeak);
       return;
     }
     setBusy(true);
@@ -61,7 +63,7 @@ export default function WorksheetView({
           : { class: cls, topics: weakTopics, count: n };
       setSheet(await generateWorksheet(body));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Worksheet nahi ban payi");
+      setErr(e instanceof Error ? e.message : t.common.retry);
     } finally {
       setBusy(false);
     }
@@ -74,11 +76,9 @@ export default function WorksheetView({
       {/* builder (hidden in print via no-print) */}
       <div className="no-print rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
         <h2 className="text-lg font-bold text-slate-100 tracking-tight mb-1">
-          📝 Worksheet banao
+          {t.worksheet.buildTitle}
         </h2>
-        <p className="text-sm text-white/60 mb-4">
-          Practice sheet — print karke copy me likh-likh kar taiyaari karo.
-        </p>
+        <p className="text-sm text-white/60 mb-4">{t.worksheet.buildDesc}</p>
 
         <div className="flex gap-2 mb-4">
           <button
@@ -89,7 +89,7 @@ export default function WorksheetView({
                 : "bg-transparent text-white/60 border-white/15 hover:border-accent/50"
             }`}
           >
-            📚 Chapter se
+            {t.worksheet.chapterMode}
           </button>
           <button
             onClick={() => setMode("weak")}
@@ -99,7 +99,7 @@ export default function WorksheetView({
                 : "bg-transparent text-white/60 border-white/15 hover:border-accent/50"
             }`}
           >
-            🎯 Kamzor topics se
+            {t.worksheet.weakMode}
           </button>
         </div>
 
@@ -127,7 +127,7 @@ export default function WorksheetView({
               className="flex-1 rounded-xl bg-ink border border-white/10 px-4 py-2.5 text-white outline-none focus:border-accent"
               aria-label="Chapter"
             >
-              <option value="">— Chapter choose karo —</option>
+              <option value="">{t.worksheet.chapterPh}</option>
               {classChapters.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.title} · {c.subject}
@@ -148,7 +148,7 @@ export default function WorksheetView({
                   ))}
                 </span>
               ) : (
-                "Abhi koi kamzor topic nahi — pehle quiz do 📝"
+                t.worksheet.weakEmpty
               )}
             </div>
           )}
@@ -172,7 +172,7 @@ export default function WorksheetView({
           disabled={busy}
           className="w-full rounded-xl bg-gradient-to-r from-accent to-accentdeep text-white font-bold py-3 hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
-          {busy ? "Worksheet ban rahi…" : "📝 Worksheet banao"}
+          {busy ? t.worksheet.making : t.worksheet.make}
         </button>
         <div className="mt-3">
           <Err msg={err} />
@@ -189,16 +189,29 @@ export default function WorksheetView({
                 <p className="text-sm opacity-70">Class {sheet.class}</p>
               )}
             </div>
-            <button
-              onClick={printSheet}
-              className="no-print shrink-0 rounded-xl bg-gradient-to-r from-accent to-accentdeep text-white font-bold px-5 py-2.5 hover:opacity-90 transition-opacity"
-            >
-              🖨 Print karo
-            </button>
+            <div className="no-print flex gap-2 shrink-0 flex-wrap justify-end">
+              <a
+                href={waShareUrl(
+                  `${t.share.worksheetPrefix} "${sheet.title}" — ${sheet.questions.length} ${t.worksheet.countLabel}.\n${t.share.worksheetEncourage}\n${t.share.appLink}`
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={t.common.shareWhatsApp}
+                className="rounded-xl border border-emerald-500/40 text-emerald-200 text-sm font-bold px-4 py-2.5 hover:bg-emerald-500/10 transition-colors"
+              >
+                {t.common.shareWhatsApp}
+              </a>
+              <button
+                onClick={printSheet}
+                className="rounded-xl bg-gradient-to-r from-accent to-accentdeep text-white font-bold px-5 py-2.5 hover:opacity-90 transition-opacity"
+              >
+                {t.worksheet.print}
+              </button>
+            </div>
           </div>
 
           <div className="rounded-xl border px-4 py-3 mb-6 text-sm leading-relaxed">
-            <p className="font-bold mb-1">📋 Nirdesh (Instructions)</p>
+            <p className="font-bold mb-1">{t.worksheet.instructions}</p>
             <ul className="list-disc list-inside space-y-0.5 opacity-80">
               <li>Har sawal ka jawab neeche di gayi jagah me likho.</li>
               <li>Pehle khud socho, phir likho — jaldi mat karo.</li>
@@ -222,9 +235,7 @@ export default function WorksheetView({
             </div>
           ))}
 
-          <p className="text-center text-xs opacity-50 mt-8">
-            — Guruji ki shubhkamnayein 🙏 —
-          </p>
+          <p className="text-center text-xs opacity-50 mt-8">{t.worksheet.footer}</p>
         </div>
       )}
     </div>

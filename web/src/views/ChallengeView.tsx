@@ -12,7 +12,9 @@ import {
   setNickname,
   type Leaderboard,
   type TodayChallenge,
+  waShareUrl,
 } from "../api";
+import { useLang } from "../i18n";
 
 function Err({ msg }: { msg: string }) {
   if (!msg) return null;
@@ -37,6 +39,7 @@ export default function ChallengeView({
 }: {
   classLevel?: string | number;
 }) {
+  const { t } = useLang();
   const [nickname, setNicknameState] = useState("");
   const [canChange, setCanChange] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -69,7 +72,7 @@ export default function ChallengeView({
       setBoard(b);
       setAnswered(t.alreadyAnswered);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Challenge load nahi ho paya");
+      setErr(e instanceof Error ? e.message : t.challenge.loadErr);
     } finally {
       setLoading(false);
     }
@@ -82,11 +85,11 @@ export default function ChallengeView({
   const saveNickname = async () => {
     const v = nickInput.trim();
     if (!v) {
-      setErr("Nickname khaali nahi ho sakta 🙂");
+      setErr(t.challenge.nickErrEmpty);
       return;
     }
     if (v.length > 24) {
-      setErr("Nickname 24 characters se chhota rakho 🙂");
+      setErr(t.challenge.nickErrLong);
       return;
     }
     setNickBusy(true);
@@ -99,7 +102,7 @@ export default function ChallengeView({
       // Nickname change -> leaderboard reload (nickname badal gaya hoga).
       setBoard(await getLeaderboard(classLevel));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Nickname save nahi ho paya");
+      setErr(e instanceof Error ? e.message : t.challenge.nickErrSave);
     } finally {
       setNickBusy(false);
     }
@@ -121,14 +124,14 @@ export default function ChallengeView({
       // Leaderboard fresh karo taaki XP dikhe.
       setBoard(await getLeaderboard(classLevel));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Jawab submit nahi ho paya");
+      setErr(e instanceof Error ? e.message : t.challenge.answerErr);
     } finally {
       setAnswering(false);
     }
   };
 
   if (loading) {
-    return <p className="text-white/50 text-sm">Challenge load ho raha hai…</p>;
+    return <p className="text-white/50 text-sm">{t.challenge.loading}</p>;
   }
 
   const q = today?.question ?? null;
@@ -142,7 +145,7 @@ export default function ChallengeView({
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <p className="text-xs text-white/50">Tumhara nickname</p>
+            <p className="text-xs text-white/50">{t.challenge.nicknameLabel}</p>
             {!editing ? (
               <p className="text-xl font-extrabold text-accentlight">
                 🏷 {nickname || "—"}
@@ -180,11 +183,11 @@ export default function ChallengeView({
               onClick={() => setEditing(true)}
               className="text-xs font-bold border border-accent/50 text-accentlight rounded-full px-4 py-2 hover:bg-accent/10 transition-colors"
             >
-              ✏ Badlo (sirf ek baar)
+              {t.challenge.change}
             </button>
           )}
           {!editing && !canChange && (
-            <span className="text-xs text-white/40">🔒 Nickname locked</span>
+            <span className="text-xs text-white/40">{t.challenge.locked}</span>
           )}
         </div>
       </div>
@@ -192,24 +195,20 @@ export default function ChallengeView({
       {/* today's question */}
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
         <h3 className="font-bold text-slate-100 tracking-tight mb-1">
-          ❓ Aaj ka challenge
+          {t.challenge.todayTitle}
         </h3>
         {!q ? (
           <div className="text-center py-6">
             <p className="text-3xl mb-2">🏆</p>
-            <p className="text-white/80 font-semibold">
-              Aaj ka challenge abhi taiyaar nahi hai
-            </p>
-            <p className="text-sm text-white/50 mt-1">
-              Thodi der baad wapas aao 🙏
-            </p>
+            <p className="text-white/80 font-semibold">{t.challenge.noQTitle}</p>
+            <p className="text-sm text-white/50 mt-1">{t.challenge.noQDesc}</p>
           </div>
         ) : (
           <>
             <p className="text-xs text-accentlight mb-2">
               📚 {q.topic}
               {today?.streak !== undefined && today.streak > 0 && (
-                <span className="ml-2 text-emerald-300">🔥 {today.streak} din streak</span>
+                <span className="ml-2 text-emerald-300">🔥 {today.streak} {t.challenge.streakDays}</span>
               )}
             </p>
             <p className="font-semibold text-white/90 mb-3">{q.text}</p>
@@ -240,18 +239,30 @@ export default function ChallengeView({
                 disabled={picked === null || answering}
                 className="w-full rounded-xl bg-gradient-to-r from-accent to-accentdeep text-white font-bold py-3 hover:opacity-90 disabled:opacity-40 transition-opacity"
               >
-                {answering ? "Check ho raha…" : "Jawab do ✔"}
+                {answering ? t.challenge.answering : t.challenge.answer}
               </button>
             ) : (
               <div className="space-y-2">
                 {verdict === "correct" && (
-                  <Info msg={`✅ Sahi jawab! ${xpNote}`} />
+                  <>
+                    <Info msg={`✅ ${t.challenge.correct} ${xpNote}`} />
+                    <a
+                      href={waShareUrl(
+                        `${t.share.challengePrefix} — ${nickname}${today?.streak ? ` (🔥 ${today.streak} ${t.challenge.streakDays})` : ""}\n${t.share.challengeEncourage}\n${t.share.appLink}`
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-center rounded-xl border border-emerald-500/40 text-emerald-200 text-sm font-bold px-5 py-2.5 hover:bg-emerald-500/10 transition-colors"
+                    >
+                      {t.common.shareWhatsApp}
+                    </a>
+                  </>
                 )}
                 {verdict === "wrong" && (
-                  <Err msg={`❌ Galat jawab. ${xpNote}`} />
+                  <Err msg={`❌ ${t.challenge.wrong} ${xpNote}`} />
                 )}
                 {verdict === "" && (
-                  <Info msg="✅ Tum aaj ka challenge pehle hi de chuke ho — kal phir aana! 💪" />
+                  <Info msg={t.challenge.alreadyDone} />
                 )}
               </div>
             )}
@@ -263,19 +274,15 @@ export default function ChallengeView({
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-bold text-slate-100 tracking-tight">
-            🏆 Weekly leaderboard
+            {t.challenge.boardTitle}
           </h3>
           {board?.week && <span className="text-xs text-white/40">{board.week}</span>}
         </div>
         {entries.length === 0 ? (
           <div className="text-center py-6">
             <p className="text-3xl mb-2">🏁</p>
-            <p className="text-white/80 font-semibold">
-              Is hafte abhi koi entry nahi
-            </p>
-            <p className="text-sm text-white/50 mt-1">
-              Challenge khelo aur leaderboard me apna naam chamkao! ✨
-            </p>
+            <p className="text-white/80 font-semibold">{t.challenge.noEntriesTitle}</p>
+            <p className="text-sm text-white/50 mt-1">{t.challenge.noEntriesDesc}</p>
           </div>
         ) : (
           <ol className="space-y-2">
@@ -293,10 +300,10 @@ export default function ChallengeView({
                 >
                   <span className="text-sm font-semibold text-white/90 min-w-0 truncate">
                     {medal} {e.nickname}
-                    {me && <span className="text-accentlight text-xs ml-1">(tum)</span>}
+                    {me && <span className="text-accentlight text-xs ml-1">{t.challenge.you}</span>}
                   </span>
                   <span className="text-sm shrink-0">
-                    <span className="font-bold text-accentlight">{e.xp} XP</span>
+                    <span className="font-bold text-accentlight">{e.xp} {t.challenge.xpSuffix}</span>
                     {e.streak > 0 && (
                       <span className="text-emerald-300 text-xs ml-2">🔥{e.streak}</span>
                     )}
@@ -310,13 +317,11 @@ export default function ChallengeView({
           onClick={load}
           className="mt-3 w-full text-xs text-accentlight border border-accent/40 rounded-full px-3 py-2 hover:border-accent transition-colors"
         >
-          🔄 Leaderboard refresh karo
+          {t.challenge.refreshBoard}
         </button>
       </div>
 
-      <p className="text-xs text-white/40 text-center px-4">
-        🔒 Leaderboard me sirf nicknames dikhte hain — koi personal data nahi.
-      </p>
+      <p className="text-xs text-white/40 text-center px-4">{t.challenge.privacyNote}</p>
     </div>
   );
 }

@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { postCopyCheck } from "../api";
 import { MessageContent } from "../chat/MessageContent";
+import { useLang } from "../i18n";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -24,6 +25,7 @@ export default function CopyCheckView({
 }: {
   classLevel?: string | number;
 }) {
+  const { t } = useLang();
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [subject, setSubject] = useState("Maths");
@@ -52,11 +54,11 @@ export default function CopyCheckView({
     setFeedback(null);
     if (!f) return;
     if (!f.type.startsWith("image/")) {
-      setErr("Sirf photo (image) upload karo — PDF ya doosri file nahi 🙏");
+      setErr(t.copycheck.errType);
       return;
     }
     if (f.size > MAX_BYTES) {
-      setErr("Photo 5MB se badi hai — chhoti photo lo ya crop karke dobara try karo 📷");
+      setErr(t.copycheck.errSize);
       return;
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -66,7 +68,7 @@ export default function CopyCheckView({
 
   const check = async () => {
     if (!file) {
-      setErr("Pehle apni copy ki photo lo ya choose karo 📷");
+      setErr(t.copycheck.errNone);
       return;
     }
     setChecking(true);
@@ -76,7 +78,7 @@ export default function CopyCheckView({
       const r = await postCopyCheck(file, cls, subject);
       setFeedback(r.feedback);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Check nahi ho paya. Dobara try karo 🙏");
+      setErr(e instanceof Error ? e.message : t.copycheck.errCheck);
     } finally {
       setChecking(false);
     }
@@ -96,12 +98,9 @@ export default function CopyCheckView({
     <div className="space-y-4">
       <div className="rounded-2xl bg-white/5 border border-white/10 shadow-xl shadow-black/20 backdrop-blur p-5">
         <h2 className="text-lg font-bold text-slate-100 tracking-tight mb-1">
-          📸 Copy check
+          {t.copycheck.title}
         </h2>
-        <p className="text-sm text-white/60 mb-4">
-          Apni notebook ya homework ki photo bhejo — Guruji padhkar Socratic
-          tareeke se feedback dega (seedha answer nahi, samajh badhayega).
-        </p>
+        <p className="text-sm text-white/60 mb-4">{t.copycheck.desc}</p>
 
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <select
@@ -150,13 +149,13 @@ export default function CopyCheckView({
               onClick={() => cameraRef.current?.click()}
               className="rounded-xl bg-gradient-to-r from-accent to-accentdeep text-white font-bold py-3 hover:opacity-90 transition-opacity"
             >
-              📷 Camera se photo lo
+              {t.copycheck.camera}
             </button>
             <button
               onClick={() => pickerRef.current?.click()}
               className="rounded-xl border border-accent/50 text-accentlight font-bold py-3 hover:bg-accent/10 transition-colors"
             >
-              🖼 Gallery se choose karo
+              {t.copycheck.gallery}
             </button>
           </div>
         ) : (
@@ -174,14 +173,14 @@ export default function CopyCheckView({
                 disabled={checking}
                 className="flex-1 rounded-xl bg-gradient-to-r from-accent to-accentdeep text-white font-bold py-3 hover:opacity-90 disabled:opacity-50 transition-opacity"
               >
-                {checking ? "⏳ Guruji dekh rahe hain…" : "✅ Check karwao"}
+                {checking ? t.copycheck.checking : t.copycheck.check}
               </button>
               <button
                 onClick={reset}
                 disabled={checking}
                 className="rounded-xl border border-white/15 text-white/70 font-semibold px-5 py-3 hover:border-white/40 disabled:opacity-40 transition-colors"
               >
-                🔄 Nayi photo
+                {t.copycheck.newPhoto}
               </button>
             </div>
           </div>
@@ -191,20 +190,17 @@ export default function CopyCheckView({
           <Err msg={err} />
           {checking && (
             <p className="text-sm text-accentlight animate-pulse">
-              ⏳ Guruji dekh rahe hain… thoda intezaar karo 🙏
+              {t.copycheck.checkingNote}
             </p>
           )}
         </div>
 
-        <p className="text-xs text-white/40 mt-4">
-          🔒 Photo sirf check ke liye bheji jaati hai — kahin save nahi hoti, aur
-          "Nayi photo" dabate hi device se hata di jaati hai.
-        </p>
+        <p className="text-xs text-white/40 mt-4">{t.copycheck.privacy}</p>
       </div>
 
       {feedback && (
         <div className="rounded-2xl bg-white/5 border border-emerald-500/30 shadow-xl shadow-black/20 backdrop-blur p-5">
-          <h3 className="font-bold text-emerald-300 mb-3">🧑‍🏫 Guruji ki feedback</h3>
+          <h3 className="font-bold text-emerald-300 mb-3">{t.copycheck.feedbackTitle}</h3>
           <div className="text-sm leading-relaxed text-white/90">
             <MessageContent text={feedback} rich />
           </div>

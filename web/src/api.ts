@@ -295,6 +295,123 @@ export async function deleteMemory(id: string): Promise<void> {
   if (!res.ok) await throwForStatus(res);
 }
 
+// ---------------------------------------------------------------- language
+
+/**
+ * Persist the UI language for this student. Best-effort: the UI language
+ * itself always comes from localStorage (see i18n.tsx); this just lets the
+ * backend reply in the same language. Never throws for the caller — a
+ * missing endpoint must not break the toggle.
+ */
+export async function setLanguage(language: "hi" | "mr"): Promise<void> {
+  try {
+    const res = await fetch(`${API}/api/student/language`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ studentId: getStudentId(), lang: language }),
+    });
+    if (!res.ok) await throwForStatus(res);
+  } catch {
+    /* localStorage fallback already applied by the caller */
+  }
+}
+
+// ---------------------------------------------------------------- notebook (saved chat answers)
+
+export interface NotebookItem {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+/**
+ * Saved tutor answers ("🔖 Notebook" tab).
+ * Contract: GET /api/notebook?studentId=&q= -> 200 { ok, notes: [{id, text, title, source, createdAt}] }
+ */
+export async function getNotebook(q = ""): Promise<NotebookItem[]> {
+  const params = new URLSearchParams({ studentId: getStudentId() });
+  if (q.trim()) params.set("q", q.trim());
+  const res = await fetch(`${API}/api/notebook?${params.toString()}`);
+  if (!res.ok) await throwForStatus(res);
+  const data = await res.json();
+  return ((data.notes ?? []) as NotebookItem[]).filter(
+    (n) => n && typeof n.id === "string" && typeof n.text === "string"
+  );
+}
+
+/**
+ * Contract: POST /api/notebook { studentId, text } -> 200 { ok, id }.
+ * The server returns only the id, so we rebuild the item locally from
+ * what we sent — the UI renders instantly without a refetch.
+ */
+export async function addNotebook(text: string): Promise<NotebookItem> {
+  const res = await fetch(`${API}/api/notebook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ studentId: getStudentId(), text }),
+  });
+  if (!res.ok) await throwForStatus(res);
+  const data = await res.json();
+  if (!data.ok || typeof data.id !== "string") throw new Error("save-failed");
+  return { id: data.id, text, createdAt: new Date().toISOString() };
+}
+
+/** Contract: DELETE /api/notebook/:id?studentId= -> 200 */
+export async function deleteNotebook(id: string): Promise<void> {
+  const res = await fetch(
+    `${API}/api/notebook/${encodeURIComponent(id)}?studentId=${encodeURIComponent(
+      getStudentId()
+    )}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) await throwForStatus(res);
+}
+
+// ---------------------------------------------------------------- impact (landing counters)
+
+export interface ImpactData {
+  questions: number;
+  quizzes: number;
+  revisions: number;
+  /** Already rounded & suffixed by the server, e.g. "50+" or "10+". */
+  learners: string;
+}
+
+/**
+ * Live impact numbers for the landing page.
+ * Contract: GET /api/impact -> 200
+ *   { ok:true, totalQuestionsAnswered, quizzesTaken, chaptersRevised, activeLearners }
+ *   or { ok:false, insufficient:true } when fewer than 5 learners exist.
+ * Throws when unreachable or insufficient — the landing page shows a
+ * graceful "coming soon" fallback instead of fake numbers.
+ */
+export async function getImpact(): Promise<ImpactData> {
+  const res = await fetch(`${API}/api/impact`);
+  if (!res.ok) await throwForStatus(res);
+  const data = await res.json();
+  if (!data.ok) throw new Error("insufficient-data");
+  const n = (v: unknown) => (typeof v === "number" && v >= 0 ? Math.floor(v) : 0);
+  return {
+    questions: n(data.totalQuestionsAnswered),
+    quizzes: n(data.quizzesTaken),
+    revisions: n(data.chaptersRevised),
+    learners:
+      typeof data.activeLearners === "string" && data.activeLearners
+        ? data.activeLearners
+        : "0",
+  };
+}
+
+// ---------------------------------------------------------------- whatsapp share
+
+/**
+ * Share-safe WhatsApp URL. Callers must only pass score + nickname +
+ * encouraging text — never studentId or personal data.
+ */
+export function waShareUrl(text: string): string {
+  return `https://wa.me/?text=${encodeURIComponent(text)}`;
+}
+
 // ---------------------------------------------------------------- copycheck (notebook photo)
 
 export interface CopyCheckResult {
