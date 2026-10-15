@@ -1039,6 +1039,11 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 const PORT = Number(process.env.PORT) || 3001;
-app.listen(PORT, () => {
-  console.log(`guruji-server listening on :${PORT}`);
-});
+// Vercel serverless: export app instead of listening (VERCEL env is set on Vercel).
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`guruji-server listening on :${PORT}`);
+  });
+}
+
+export default app;
